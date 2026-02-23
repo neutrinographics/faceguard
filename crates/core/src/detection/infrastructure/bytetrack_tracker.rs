@@ -152,9 +152,11 @@ impl ByteTracker {
         let max_lost = self.max_lost;
         self.tracks.retain(|t| t.frames_lost <= max_lost);
 
-        // Return all active tracks
+        // Return only matched tracks (lost tracks are kept internally for
+        // re-identification but should not produce blur regions)
         self.tracks
             .iter()
+            .filter(|t| t.matched)
             .map(|t| Track {
                 id: t.id,
                 bbox: t.bbox,
