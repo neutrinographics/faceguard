@@ -97,6 +97,9 @@ impl FaceGrouper for EmbeddingFaceGrouper {
         }
 
         let mut result: Vec<Vec<u32>> = groups.into_values().collect();
+        for g in &mut result {
+            g.sort();
+        }
         result.sort_by_key(|g| g[0]);
         Ok(result)
     }
@@ -114,9 +117,10 @@ fn preprocess(rgb_data: &[u8], width: u32, height: u32) -> ndarray::Array4<f32> 
     let mut tensor = ndarray::Array4::<f32>::zeros((1, 3, INPUT_SIZE, INPUT_SIZE));
 
     for y in 0..INPUT_SIZE {
-        let src_y = (y * src_h / INPUT_SIZE).min(src_h - 1);
+        let src_y = (((y as f64 + 0.5) * src_h as f64 / INPUT_SIZE as f64) as usize).min(src_h - 1);
         for x in 0..INPUT_SIZE {
-            let src_x = (x * src_w / INPUT_SIZE).min(src_w - 1);
+            let src_x =
+                (((x as f64 + 0.5) * src_w as f64 / INPUT_SIZE as f64) as usize).min(src_w - 1);
             let offset = (src_y * src_w + src_x) * 3;
             if offset + 2 < rgb_data.len() {
                 for c in 0..3 {

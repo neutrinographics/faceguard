@@ -24,6 +24,9 @@ const NMS_IOU_THRESH: f64 = 0.45;
 /// Number of keypoints per detection (5 landmarks × 3 values each: x, y, conf).
 const NUM_KEYPOINT_VALUES: usize = 15;
 
+/// Minimum keypoint confidence to treat a landmark as visible.
+const KEYPOINT_CONF_THRESH: f64 = 0.5;
+
 /// YOLO face detector backed by an ONNX Runtime session.
 pub struct OnnxYoloDetector {
     session: ort::session::Session,
@@ -61,6 +64,9 @@ impl FaceDetector for OnnxYoloDetector {
         // 2. Inference
         let input_value = ort::value::Tensor::from_array(input_tensor)?;
         let outputs = self.session.run(ort::inputs![input_value])?;
+        if outputs.len() == 0 {
+            return Err("YOLO model produced no outputs".into());
+        }
         let tensor = outputs[0].try_extract_array::<f32>()?;
         let shape = tensor.shape();
 
@@ -112,14 +118,18 @@ impl FaceDetector for OnnxYoloDetector {
             let x2 = ((cx + w / 2.0) - pad_x as f64) / scale;
             let y2 = ((cy + h / 2.0) - pad_y as f64) / scale;
 
-            // Parse keypoints if available
+            // Parse keypoints if available, filtering by confidence
             let keypoints = if row.len() >= 5 + NUM_KEYPOINT_VALUES {
                 let mut pts = [(0.0f64, 0.0f64); 5];
                 for k in 0..5 {
-                    let kx = row[5 + k * 3] as f64;
-                    let ky = row[5 + k * 3 + 1] as f64;
-                    // Map keypoints from letterbox coords to original
-                    pts[k] = ((kx - pad_x as f64) / scale, (ky - pad_y as f64) / scale);
+                    let kconf = row[5 + k * 3 + 2] as f64;
+                    if kconf >= KEYPOINT_CONF_THRESH {
+                        let kx = row[5 + k * 3] as f64;
+                        let ky = row[5 + k * 3 + 1] as f64;
+                        // Map keypoints from letterbox coords to original
+                        pts[k] = ((kx - pad_x as f64) / scale, (ky - pad_y as f64) / scale);
+                    }
+                    // else: pts[k] remains (0.0, 0.0), treated as invisible by FaceLandmarks
                 }
                 Some(pts)
             } else {
@@ -152,12 +162,12 @@ impl FaceDetector for OnnxYoloDetector {
         // 6. Build regions — match tracks back to detections by IoU
         let mut regions = Vec::new();
         for track in &tracks {
-            // Find the best-matching filtered detection for this track
-            let best_det = filtered.iter().min_by(|a, b| {
+            // Find the detection with highest IoU overlap to this track
+            let best_det = filtered.iter().max_by(|a, b| {
                 let iou_a = bbox_iou(&[a.x1, a.y1, a.x2, a.y2], &track.bbox);
                 let iou_b = bbox_iou(&[b.x1, b.y1, b.x2, b.y2], &track.bbox);
-                iou_b
-                    .partial_cmp(&iou_a)
+                iou_a
+                    .partial_cmp(&iou_b)
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
 
@@ -206,11 +216,9 @@ fn letterbox(frame: &Frame, target_size: u32) -> (ndarray::Array4<f32>, f64, u32
 
     // Nearest-neighbor resize + copy into padded region
     for y in 0..new_h as usize {
-        let src_y = ((y as f64 / scale).min(fh - 1.0)) as usize;
-        let src_y = src_y.min(src_h - 1);
+        let src_y = ((y as f64 / scale) as usize).min(src_h - 1);
         for x in 0..new_w as usize {
-            let src_x = ((x as f64 / scale).min(fw - 1.0)) as usize;
-            let src_x = src_x.min(src_w - 1);
+            let src_x = ((x as f64 / scale) as usize).min(src_w - 1);
             let ty = pad_y as usize + y;
             let tx = pad_x as usize + x;
             for c in 0..3 {

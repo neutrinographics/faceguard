@@ -66,6 +66,9 @@ impl FaceGrouper for HistogramFaceGrouper {
         }
 
         let mut result: Vec<Vec<u32>> = groups.into_values().collect();
+        for g in &mut result {
+            g.sort();
+        }
         result.sort_by_key(|g| g[0]);
         Ok(result)
     }
@@ -165,7 +168,13 @@ fn pearson_correlation(a: &[f64], b: &[f64]) -> f64 {
 
     let denom = (var_a * var_b).sqrt();
     if denom < f64::EPSILON {
-        return 0.0;
+        // Both zero variance means identical distributions → perfect correlation.
+        // One zero, one non-zero → undefined, treat as uncorrelated.
+        return if var_a < f64::EPSILON && var_b < f64::EPSILON {
+            1.0
+        } else {
+            0.0
+        };
     }
 
     cov / denom
@@ -324,12 +333,20 @@ mod tests {
 
     #[test]
     fn test_pearson_uncorrelated() {
-        // Flat vs one-hot — should have low correlation
+        // Flat vs one-hot — flat has zero variance, one-hot has non-zero variance
         let a = vec![0.25, 0.25, 0.25, 0.25];
         let b = vec![1.0, 0.0, 0.0, 0.0];
         let r = pearson_correlation(&a, &b);
-        // Flat histogram has zero variance → correlation = 0
+        // One zero variance, one non-zero → treated as uncorrelated (0.0)
         assert!((r - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_pearson_both_zero_variance() {
+        // Both flat → identical distributions → perfect correlation (1.0)
+        let a = vec![0.25, 0.25, 0.25, 0.25];
+        let r = pearson_correlation(&a, &a);
+        assert!((r - 1.0).abs() < 1e-9);
     }
 
     #[test]

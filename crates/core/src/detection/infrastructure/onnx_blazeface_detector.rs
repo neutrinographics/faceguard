@@ -92,7 +92,7 @@ impl FaceDetector for OnnxBlazefaceDetector {
 
             let anchor = &self.anchors[i];
             let reg_offset = i * 16;
-            if reg_offset + 3 >= reg_data.len() {
+            if reg_offset + 4 > reg_data.len() {
                 break;
             }
 
@@ -124,10 +124,11 @@ impl FaceDetector for OnnxBlazefaceDetector {
         let regions = filtered
             .iter()
             .map(|d| {
-                let x = d.x1.max(0.0) as i32;
-                let y = d.y1.max(0.0) as i32;
-                let w = ((d.x2 - d.x1).max(0.0) as i32).min(fw as i32 - x);
-                let h = ((d.y2 - d.y1).max(0.0) as i32).min(fh as i32 - y);
+                // x1/y1 are already clamped to >= 0 during decoding
+                let x = d.x1 as i32;
+                let y = d.y1 as i32;
+                let w = ((d.x2 - d.x1) as i32).min(fw as i32 - x);
+                let h = ((d.y2 - d.y1) as i32).min(fh as i32 - y);
                 Region {
                     x,
                     y,
@@ -160,9 +161,9 @@ fn preprocess(frame: &Frame, size: u32) -> ndarray::Array4<f32> {
     let mut tensor = ndarray::Array4::<f32>::zeros((1, 3, s, s));
 
     for y in 0..s {
-        let src_y = (y * src_h / s).min(src_h - 1);
+        let src_y = (((y as f64 + 0.5) * src_h as f64 / s as f64) as usize).min(src_h - 1);
         for x in 0..s {
-            let src_x = (x * src_w / s).min(src_w - 1);
+            let src_x = (((x as f64 + 0.5) * src_w as f64 / s as f64) as usize).min(src_w - 1);
             for c in 0..3 {
                 tensor[[0, c, y, x]] = src[[src_y, src_x, c]] as f32 / 255.0;
             }

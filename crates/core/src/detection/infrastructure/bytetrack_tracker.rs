@@ -3,7 +3,7 @@
 /// Maintains persistent track IDs across frames using IoU-based greedy
 /// matching with a two-stage association strategy (high-confidence first,
 /// then low-confidence for unmatched tracks).
-use std::collections::HashMap;
+use std::collections::HashSet;
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -42,6 +42,7 @@ struct TrackState {
     id: u32,
     bbox: [f64; 4],
     frames_lost: usize,
+    matched: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -85,55 +86,60 @@ impl ByteTracker {
             }
         }
 
-        let mut matched_track_indices: Vec<bool> = vec![false; self.tracks.len()];
-        let mut matched_det_indices: Vec<bool> = vec![false; detections.len()];
+        // Reset match flags on existing tracks
+        for track in &mut self.tracks {
+            track.matched = false;
+        }
+        let mut matched_det_indices = HashSet::new();
+        let num_existing = self.tracks.len();
 
         // Stage 1: match high-confidence detections to tracks
-        let matches_high = greedy_match(&self.tracks, &high, MATCH_THRESH);
-        for (ti, di) in &matches_high {
-            self.tracks[*ti].bbox = detections[*di].bbox;
-            self.tracks[*ti].frames_lost = 0;
-            matched_track_indices[*ti] = true;
-            matched_det_indices[*di] = true;
-        }
-
-        // Stage 2: match low-confidence detections to remaining tracks
-        let unmatched_tracks: Vec<(usize, &TrackState)> = self
+        let track_refs: Vec<(usize, [f64; 4])> = self
             .tracks
             .iter()
             .enumerate()
-            .filter(|(i, _)| !matched_track_indices[*i])
+            .map(|(i, t)| (i, t.bbox))
             .collect();
-        let matches_low = greedy_match_refs(&unmatched_tracks, &low, MATCH_THRESH);
+        let matches_high = greedy_match(&track_refs, &high, MATCH_THRESH);
+        for (ti, di) in &matches_high {
+            self.tracks[*ti].bbox = detections[*di].bbox;
+            self.tracks[*ti].frames_lost = 0;
+            self.tracks[*ti].matched = true;
+            matched_det_indices.insert(*di);
+        }
+
+        // Stage 2: match low-confidence detections to remaining unmatched tracks
+        let unmatched_track_refs: Vec<(usize, [f64; 4])> = self
+            .tracks
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| !t.matched)
+            .map(|(i, t)| (i, t.bbox))
+            .collect();
+        let matches_low = greedy_match(&unmatched_track_refs, &low, MATCH_THRESH);
         for (ti, di) in &matches_low {
             self.tracks[*ti].bbox = detections[*di].bbox;
             self.tracks[*ti].frames_lost = 0;
-            matched_track_indices[*ti] = true;
-            matched_det_indices[*di] = true;
+            self.tracks[*ti].matched = true;
         }
 
         // Start new tracks for unmatched high-confidence detections
         for (di, _det) in &high {
-            if !matched_det_indices[*di] {
+            if !matched_det_indices.contains(di) {
                 self.tracks.push(TrackState {
                     id: self.next_id,
                     bbox: detections[*di].bbox,
                     frames_lost: 0,
+                    matched: true,
                 });
                 self.next_id += 1;
-                // Grow matched arrays to keep indices valid
-                matched_track_indices.push(true);
             }
         }
 
-        // Increment lost counter for unmatched tracks, remove stale ones
-        for (i, matched) in matched_track_indices
-            .iter()
-            .enumerate()
-            .take(self.tracks.len())
-        {
-            if !matched {
-                self.tracks[i].frames_lost += 1;
+        // Increment lost counter for unmatched existing tracks, remove stale ones
+        for track in self.tracks.iter_mut().take(num_existing) {
+            if !track.matched {
+                track.frames_lost += 1;
             }
         }
         let max_lost = self.max_lost;
@@ -173,50 +179,19 @@ fn iou_bbox(a: &[f64; 4], b: &[f64; 4]) -> f64 {
     inter / (area_a + area_b - inter)
 }
 
-/// Greedy IoU matching between existing tracks and a subset of detections.
+/// Greedy IoU matching between tracks (given as (index, bbox) pairs)
+/// and a subset of detections.
 /// Returns `Vec<(track_index, detection_original_index)>`.
 fn greedy_match(
-    tracks: &[TrackState],
+    tracks: &[(usize, [f64; 4])],
     dets: &[(usize, &Detection)],
     thresh: f64,
 ) -> Vec<(usize, usize)> {
     // Build IoU matrix and sort by descending IoU
     let mut pairs: Vec<(usize, usize, f64)> = Vec::new();
-    for (ti, track) in tracks.iter().enumerate() {
+    for (ti, bbox) in tracks {
         for (di, det) in dets {
-            let score = iou_bbox(&track.bbox, &det.bbox);
-            if score >= thresh {
-                pairs.push((ti, *di, score));
-            }
-        }
-    }
-    pairs.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
-
-    let mut used_tracks = vec![false; tracks.len()];
-    // detection indices can be sparse, track by original index
-    let mut used_dets: HashMap<usize, bool> = HashMap::new();
-    let mut matches = Vec::new();
-
-    for (ti, di, _) in &pairs {
-        if !used_tracks[*ti] && !used_dets.contains_key(di) {
-            used_tracks[*ti] = true;
-            used_dets.insert(*di, true);
-            matches.push((*ti, *di));
-        }
-    }
-    matches
-}
-
-/// Same as `greedy_match` but takes pre-filtered (index, &TrackState) refs.
-fn greedy_match_refs(
-    tracks: &[(usize, &TrackState)],
-    dets: &[(usize, &Detection)],
-    thresh: f64,
-) -> Vec<(usize, usize)> {
-    let mut pairs: Vec<(usize, usize, f64)> = Vec::new();
-    for (ti, track) in tracks {
-        for (di, det) in dets {
-            let score = iou_bbox(&track.bbox, &det.bbox);
+            let score = iou_bbox(bbox, &det.bbox);
             if score >= thresh {
                 pairs.push((*ti, *di, score));
             }
@@ -224,14 +199,14 @@ fn greedy_match_refs(
     }
     pairs.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
 
-    let mut used_tracks: HashMap<usize, bool> = HashMap::new();
-    let mut used_dets: HashMap<usize, bool> = HashMap::new();
+    let mut used_tracks = HashSet::new();
+    let mut used_dets = HashSet::new();
     let mut matches = Vec::new();
 
     for (ti, di, _) in &pairs {
-        if !used_tracks.contains_key(ti) && !used_dets.contains_key(di) {
-            used_tracks.insert(*ti, true);
-            used_dets.insert(*di, true);
+        if !used_tracks.contains(ti) && !used_dets.contains(di) {
+            used_tracks.insert(*ti);
+            used_dets.insert(*di);
             matches.push((*ti, *di));
         }
     }
