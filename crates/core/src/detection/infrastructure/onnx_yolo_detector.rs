@@ -183,19 +183,14 @@ impl FaceDetector for OnnxYoloDetector {
             .collect();
         let tracks = self.tracker.update(&tracker_dets);
 
-        // 6. Build regions — match tracks back to detections by IoU
+        // 6. Build regions — use det_index from tracker for direct lookup
         let mut regions = Vec::new();
         for track in &tracks {
-            // Find the detection with highest IoU overlap to this track
-            let best_det = filtered.iter().max_by(|a, b| {
-                let iou_a = bbox_iou(&[a.x1, a.y1, a.x2, a.y2], &track.bbox);
-                let iou_b = bbox_iou(&[b.x1, b.y1, b.x2, b.y2], &track.bbox);
-                iou_a
-                    .partial_cmp(&iou_b)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
-
-            let landmarks = best_det.and_then(|d| d.keypoints).map(FaceLandmarks::new);
+            let landmarks = track
+                .det_index
+                .and_then(|i| filtered.get(i))
+                .and_then(|d| d.keypoints)
+                .map(FaceLandmarks::new);
 
             let region = self.region_builder.build(
                 (track.bbox[0], track.bbox[1], track.bbox[2], track.bbox[3]),

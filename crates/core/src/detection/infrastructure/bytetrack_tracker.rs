@@ -25,6 +25,8 @@ pub struct Track {
     pub id: u32,
     /// Current bounding box `[x1, y1, x2, y2]`.
     pub bbox: [f64; 4],
+    /// Index into the detections array that this track matched, if any.
+    pub det_index: Option<usize>,
 }
 
 /// Confidence threshold separating high and low detections.
@@ -43,6 +45,7 @@ struct TrackState {
     bbox: [f64; 4],
     frames_lost: usize,
     matched: bool,
+    det_index: Option<usize>,
 }
 
 // ---------------------------------------------------------------------------
@@ -89,6 +92,7 @@ impl ByteTracker {
         // Reset match flags on existing tracks
         for track in &mut self.tracks {
             track.matched = false;
+            track.det_index = None;
         }
         let mut matched_det_indices = HashSet::new();
         let num_existing = self.tracks.len();
@@ -105,6 +109,7 @@ impl ByteTracker {
             self.tracks[*ti].bbox = detections[*di].bbox;
             self.tracks[*ti].frames_lost = 0;
             self.tracks[*ti].matched = true;
+            self.tracks[*ti].det_index = Some(*di);
             matched_det_indices.insert(*di);
         }
 
@@ -121,6 +126,7 @@ impl ByteTracker {
             self.tracks[*ti].bbox = detections[*di].bbox;
             self.tracks[*ti].frames_lost = 0;
             self.tracks[*ti].matched = true;
+            self.tracks[*ti].det_index = Some(*di);
         }
 
         // Start new tracks for unmatched high-confidence detections
@@ -131,6 +137,7 @@ impl ByteTracker {
                     bbox: detections[*di].bbox,
                     frames_lost: 0,
                     matched: true,
+                    det_index: Some(*di),
                 });
                 self.next_id += 1;
             }
@@ -151,6 +158,7 @@ impl ByteTracker {
             .map(|t| Track {
                 id: t.id,
                 bbox: t.bbox,
+                det_index: t.det_index,
             })
             .collect()
     }

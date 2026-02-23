@@ -77,9 +77,11 @@ fn interpolate(region: &Region, idx: usize, total: usize, frame_w: u32, frame_h:
 
     let min_dist = d_left.min(d_right).min(d_top).min(d_bottom);
 
-    // Determine which edge is nearest and its threshold
+    // Determine which edge is nearest and its threshold.
+    // Use a small tolerance for float comparison (matching Python's integer arithmetic).
+    let eps = 1e-9;
     let threshold =
-        if (min_dist - d_left).abs() < f64::EPSILON || (min_dist - d_right).abs() < f64::EPSILON {
+        if (min_dist - d_left).abs() < eps || (min_dist - d_right).abs() < eps {
             frame_w as f64 * EDGE_FRACTION
         } else {
             frame_h as f64 * EDGE_FRACTION
@@ -89,11 +91,11 @@ fn interpolate(region: &Region, idx: usize, total: usize, frame_w: u32, frame_h:
         return region.clone();
     }
 
-    let (dx, dy) = if (min_dist - d_left).abs() < f64::EPSILON {
+    let (dx, dy) = if (min_dist - d_left).abs() < eps {
         (-d_left * t, 0.0)
-    } else if (min_dist - d_right).abs() < f64::EPSILON {
+    } else if (min_dist - d_right).abs() < eps {
         (d_right * t, 0.0)
-    } else if (min_dist - d_top).abs() < f64::EPSILON {
+    } else if (min_dist - d_top).abs() < eps {
         (0.0, -d_top * t)
     } else {
         (0.0, d_bottom * t)
