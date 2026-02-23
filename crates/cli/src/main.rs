@@ -25,9 +25,9 @@ use video_blur_core::video::infrastructure::image_file_writer::ImageFileWriter;
 // Model constants
 // ---------------------------------------------------------------------------
 
-const YOLO_MODEL_NAME: &str = "yolo11n-face.onnx";
+const YOLO_MODEL_NAME: &str = "yolo11n-pose_widerface.onnx";
 const YOLO_MODEL_URL: &str =
-    "https://github.com/da1nerd/video-blur/releases/download/models-v1/yolo11n-face.onnx";
+    "https://github.com/da1nerd/video-blur/releases/download/v0.1.0/yolo11n-pose_widerface.onnx";
 
 const BLAZEFACE_MODEL_NAME: &str = "blaze_face_short_range.onnx";
 const BLAZEFACE_MODEL_URL: &str =

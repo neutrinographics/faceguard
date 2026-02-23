@@ -12,8 +12,8 @@ use crate::shared::region::Region;
 
 use super::bytetrack_tracker::{ByteTracker, Detection as TrackerDetection};
 
-/// YOLO model input resolution.
-const INPUT_SIZE: u32 = 640;
+/// Fallback YOLO model input resolution when the model doesn't specify dimensions.
+const DEFAULT_INPUT_SIZE: u32 = 640;
 
 /// Default confidence threshold for face detection.
 pub const DEFAULT_CONFIDENCE: f64 = 0.25;
@@ -33,10 +33,14 @@ pub struct OnnxYoloDetector {
     region_builder: FaceRegionBuilder,
     tracker: ByteTracker,
     confidence: f64,
+    input_size: u32,
 }
 
 impl OnnxYoloDetector {
     /// Load a YOLO ONNX model and prepare for inference.
+    ///
+    /// The input resolution is read from the model's input shape (expecting NCHW).
+    /// Falls back to 640 if the shape is dynamic or unreadable.
     pub fn new(
         model_path: &Path,
         region_builder: FaceRegionBuilder,
@@ -44,11 +48,31 @@ impl OnnxYoloDetector {
         confidence: f64,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let session = ort::session::Session::builder()?.commit_from_file(model_path)?;
+
+        // Try to read input size from model metadata (NCHW: [1, 3, H, W])
+        let input_size = session
+            .inputs()
+            .first()
+            .and_then(|input| {
+                if let ort::value::ValueType::Tensor { ref shape, .. } = input.dtype() {
+                    // shape is [N, C, H, W] — use H (they should be equal for square input)
+                    if shape.len() >= 4 && shape[2] > 0 {
+                        Some(shape[2] as u32)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(DEFAULT_INPUT_SIZE);
+
         Ok(Self {
             session,
             region_builder,
             tracker,
             confidence,
+            input_size,
         })
     }
 }
@@ -59,7 +83,7 @@ impl FaceDetector for OnnxYoloDetector {
         let fh = frame.height();
 
         // 1. Preprocess: letterbox + normalize → NCHW float32
-        let (input_tensor, scale, pad_x, pad_y) = letterbox(frame, INPUT_SIZE);
+        let (input_tensor, scale, pad_x, pad_y) = letterbox(frame, self.input_size);
 
         // 2. Inference
         let input_value = ort::value::Tensor::from_array(input_tensor)?;
