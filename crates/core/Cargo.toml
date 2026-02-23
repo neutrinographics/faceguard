@@ -18,6 +18,7 @@ log = { workspace = true }
 image = { workspace = true }
 ffmpeg-next = { workspace = true }
 crossbeam-channel = { workspace = true }
+ort = { workspace = true }
 
 [dev-dependencies]
 rstest = { workspace = true }
