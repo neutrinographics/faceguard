@@ -20,7 +20,8 @@
       "Bash(/Users/joel/.cargo/bin/cargo fmt:*)",
       "Bash(grep:*)",
       "Bash(/Users/joel/.cargo/bin/cargo build:*)",
-      "Bash(/Users/joel/.cargo/bin/cargo clippy:*)"
+      "Bash(/Users/joel/.cargo/bin/cargo clippy:*)",
+      "Bash(cargo build:*)"
     ]
   }
 }

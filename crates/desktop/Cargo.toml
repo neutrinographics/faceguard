@@ -12,3 +12,13 @@ path = "src/main.rs"
 
 [dependencies]
 video-blur-core = { workspace = true }
+iced = { workspace = true }
+rfd = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+dirs = { workspace = true }
+open = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+crossbeam-channel = { workspace = true }
+image = { workspace = true }
