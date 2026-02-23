@@ -1,0 +1,30 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/cli",
+    "crates/desktop",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+
+[workspace.dependencies]
+video-blur-core = { path = "crates/core" }
+ndarray = "0.16"
+thiserror = "2"
+rstest = "0.23"
+approx = "0.5"
+dirs = "6"
+reqwest = { version = "0.12", features = ["blocking"] }
+tempfile = "3"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+opt-level = "s"
+panic = "abort"

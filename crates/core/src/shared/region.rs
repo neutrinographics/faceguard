@@ -1,0 +1,274 @@
+/// A blur target region with edge-aware rendering support.
+///
+/// Stores both clamped (visible) and unclamped (full) dimensions so
+/// ellipses slide off frame edges naturally instead of shrinking.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Region {
+    /// Clamped visible area within the frame.
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    /// Optional persistent tracking identifier.
+    pub track_id: Option<u32>,
+    /// Unclamped (pre-clip) dimensions for ellipse rendering.
+    pub full_width: Option<i32>,
+    pub full_height: Option<i32>,
+    pub unclamped_x: Option<i32>,
+    pub unclamped_y: Option<i32>,
+}
+
+impl Region {
+    /// Ellipse center relative to the clamped ROI.
+    ///
+    /// When the region is clipped at a frame edge, the center shifts so
+    /// the ellipse extends naturally off-screen rather than shrinking.
+    pub fn ellipse_center_in_roi(&self) -> (f64, f64) {
+        let fw = self.full_width.unwrap_or(self.width);
+        let fh = self.full_height.unwrap_or(self.height);
+        let ux = self.unclamped_x.unwrap_or(self.x);
+        let uy = self.unclamped_y.unwrap_or(self.y);
+        let center_x = (fw as f64) / 2.0 - (self.x - ux) as f64;
+        let center_y = (fh as f64) / 2.0 - (self.y - uy) as f64;
+        (center_x, center_y)
+    }
+
+    /// Ellipse semi-axes using full (unclamped) dimensions.
+    pub fn ellipse_axes(&self) -> (f64, f64) {
+        let fw = self.full_width.unwrap_or(self.width);
+        let fh = self.full_height.unwrap_or(self.height);
+        (fw as f64 / 2.0, fh as f64 / 2.0)
+    }
+
+    /// Intersection-over-Union with another region.
+    pub fn iou(&self, other: &Region) -> f64 {
+        let ax2 = self.x + self.width;
+        let ay2 = self.y + self.height;
+        let bx2 = other.x + other.width;
+        let by2 = other.y + other.height;
+
+        let ix1 = self.x.max(other.x);
+        let iy1 = self.y.max(other.y);
+        let ix2 = ax2.min(bx2);
+        let iy2 = ay2.min(by2);
+
+        let inter = (ix2 - ix1).max(0) as f64 * (iy2 - iy1).max(0) as f64;
+        if inter == 0.0 {
+            return 0.0;
+        }
+
+        let area_a = self.width as f64 * self.height as f64;
+        let area_b = other.width as f64 * other.height as f64;
+        inter / (area_a + area_b - inter)
+    }
+
+    /// Greedy deduplication by IoU.
+    ///
+    /// Iterates through regions in order, keeping a region only if its IoU
+    /// with ALL previously-kept regions is <= `iou_threshold`.
+    pub fn deduplicate(regions: &[Region], iou_threshold: f64) -> Vec<Region> {
+        if regions.len() <= 1 {
+            return regions.to_vec();
+        }
+        let mut kept: Vec<Region> = Vec::with_capacity(regions.len());
+        for r in regions {
+            let dominated = kept.iter().any(|k| r.iou(k) > iou_threshold);
+            if !dominated {
+                kept.push(r.clone());
+            }
+        }
+        kept
+    }
+}
+
+/// Default IoU threshold for deduplication.
+pub const DEFAULT_IOU_THRESHOLD: f64 = 0.3;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use approx::assert_relative_eq;
+    use rstest::rstest;
+
+    fn region(x: i32, y: i32, w: i32, h: i32) -> Region {
+        Region {
+            x,
+            y,
+            width: w,
+            height: h,
+            track_id: None,
+            full_width: None,
+            full_height: None,
+            unclamped_x: None,
+            unclamped_y: None,
+        }
+    }
+
+    #[allow(dead_code)]
+    fn region_with_track(x: i32, y: i32, w: i32, h: i32, tid: u32) -> Region {
+        Region {
+            track_id: Some(tid),
+            ..region(x, y, w, h)
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn region_with_unclamped(
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        ux: i32,
+        uy: i32,
+        fw: i32,
+        fh: i32,
+    ) -> Region {
+        Region {
+            unclamped_x: Some(ux),
+            unclamped_y: Some(uy),
+            full_width: Some(fw),
+            full_height: Some(fh),
+            ..region(x, y, w, h)
+        }
+    }
+
+    // ── IoU ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_iou_identical_regions() {
+        let a = region(10, 10, 100, 100);
+        assert_relative_eq!(a.iou(&a), 1.0);
+    }
+
+    #[test]
+    fn test_iou_no_overlap() {
+        let a = region(0, 0, 50, 50);
+        let b = region(100, 100, 50, 50);
+        assert_relative_eq!(a.iou(&b), 0.0);
+    }
+
+    #[test]
+    fn test_iou_partial_overlap() {
+        // a: [0,0]-[100,100], b: [50,0]-[150,100]
+        // intersection: [50,0]-[100,100] = 50*100 = 5000
+        // union: 10000 + 10000 - 5000 = 15000
+        let a = region(0, 0, 100, 100);
+        let b = region(50, 0, 100, 100);
+        assert_relative_eq!(a.iou(&b), 5000.0 / 15000.0);
+    }
+
+    #[test]
+    fn test_iou_contained() {
+        // b fully inside a
+        let a = region(0, 0, 100, 100);
+        let b = region(25, 25, 50, 50);
+        // inter = 2500, union = 10000 + 2500 - 2500 = 10000
+        assert_relative_eq!(a.iou(&b), 2500.0 / 10000.0);
+    }
+
+    #[test]
+    fn test_iou_touching_edges() {
+        let a = region(0, 0, 50, 50);
+        let b = region(50, 0, 50, 50);
+        assert_relative_eq!(a.iou(&b), 0.0);
+    }
+
+    // ── Deduplication ────────────────────────────────────────────────
+
+    #[test]
+    fn test_deduplicate_empty() {
+        let result = Region::deduplicate(&[], DEFAULT_IOU_THRESHOLD);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_deduplicate_single() {
+        let regions = vec![region(0, 0, 50, 50)];
+        let result = Region::deduplicate(&regions, DEFAULT_IOU_THRESHOLD);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_deduplicate_removes_overlapping() {
+        let regions = vec![
+            region(0, 0, 100, 100),
+            region(10, 10, 100, 100), // high IoU with first
+        ];
+        let result = Region::deduplicate(&regions, DEFAULT_IOU_THRESHOLD);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], regions[0]);
+    }
+
+    #[test]
+    fn test_deduplicate_keeps_non_overlapping() {
+        let regions = vec![
+            region(0, 0, 50, 50),
+            region(200, 200, 50, 50), // no overlap
+        ];
+        let result = Region::deduplicate(&regions, DEFAULT_IOU_THRESHOLD);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_deduplicate_default_threshold() {
+        // Verify the constant is 0.3
+        assert_relative_eq!(DEFAULT_IOU_THRESHOLD, 0.3);
+    }
+
+    // ── Ellipse geometry ─────────────────────────────────────────────
+
+    #[test]
+    fn test_ellipse_center_no_clamping() {
+        // No unclamped values → center is just width/2, height/2
+        let r = region(100, 100, 200, 150);
+        let (cx, cy) = r.ellipse_center_in_roi();
+        assert_relative_eq!(cx, 100.0);
+        assert_relative_eq!(cy, 75.0);
+    }
+
+    #[test]
+    fn test_ellipse_center_clipped_at_left_edge() {
+        // Full region: unclamped_x=-50, full_width=200
+        // Clamped: x=0, width=150
+        // center_x = 200/2 - (0 - (-50)) = 100 - 50 = 50
+        let r = region_with_unclamped(0, 100, 150, 200, -50, 100, 200, 200);
+        let (cx, _cy) = r.ellipse_center_in_roi();
+        assert_relative_eq!(cx, 50.0);
+    }
+
+    #[test]
+    fn test_ellipse_center_clipped_at_top_edge() {
+        // Full region: unclamped_y=-30, full_height=100
+        // Clamped: y=0, height=70
+        // center_y = 100/2 - (0 - (-30)) = 50 - 30 = 20
+        let r = region_with_unclamped(100, 0, 200, 70, 100, -30, 200, 100);
+        let (_cx, cy) = r.ellipse_center_in_roi();
+        assert_relative_eq!(cy, 20.0);
+    }
+
+    #[test]
+    fn test_ellipse_axes_no_unclamped() {
+        let r = region(0, 0, 200, 150);
+        let (ax, ay) = r.ellipse_axes();
+        assert_relative_eq!(ax, 100.0);
+        assert_relative_eq!(ay, 75.0);
+    }
+
+    #[test]
+    fn test_ellipse_axes_uses_full_dimensions() {
+        // full_width=300, full_height=250 (larger than clamped)
+        let r = region_with_unclamped(0, 0, 200, 150, -50, -50, 300, 250);
+        let (ax, ay) = r.ellipse_axes();
+        assert_relative_eq!(ax, 150.0);
+        assert_relative_eq!(ay, 125.0);
+    }
+
+    // ── Parametrized IoU edge cases ──────────────────────────────────
+
+    #[rstest]
+    #[case::zero_width(region(0, 0, 0, 100), region(0, 0, 50, 50), 0.0)]
+    #[case::zero_height(region(0, 0, 100, 0), region(0, 0, 50, 50), 0.0)]
+    fn test_iou_degenerate(#[case] a: Region, #[case] b: Region, #[case] expected: f64) {
+        assert_relative_eq!(a.iou(&b), expected);
+    }
+}
