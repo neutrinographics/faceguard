@@ -50,8 +50,6 @@ impl PreviewFacesUseCase {
         metadata: &VideoMetadata,
         output_dir: &Path,
     ) -> Result<PreviewResult, Box<dyn std::error::Error>> {
-        std::fs::create_dir_all(output_dir)?;
-
         // track_id → (area, crop_frame)
         let mut best: HashMap<u32, (u32, Frame)> = HashMap::new();
         let mut detection_cache: HashMap<usize, Vec<Region>> = HashMap::new();

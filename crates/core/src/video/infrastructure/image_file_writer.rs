@@ -27,6 +27,11 @@ impl ImageWriter for ImageFileWriter {
         frame: &Frame,
         size: Option<(u32, u32)>,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        // Ensure parent directory exists (infrastructure concern)
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
         let img = image::RgbImage::from_raw(frame.width(), frame.height(), frame.data().to_vec())
             .ok_or("Failed to create image from frame data")?;
 
