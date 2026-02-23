@@ -16,11 +16,15 @@ use crate::video::domain::video_writer::VideoWriter;
 /// Default number of frames to buffer for lookahead merging.
 const DEFAULT_LOOKAHEAD: usize = 5;
 
+/// Bounded channel capacity for reader → main and main → writer threads.
+const CHANNEL_CAPACITY: usize = 4;
+
 /// Orchestrates the full video blurring pipeline.
 ///
-/// Reads frames, detects faces, buffers for lookahead, merges current
-/// and future regions, blurs, and writes output. Supports progress
-/// reporting and cancellation.
+/// Uses crossbeam bounded channels for pipelined I/O:
+/// - Reader thread → channel(4) → main thread (detect/buffer/merge/blur) → channel(4) → writer thread
+///
+/// Supports progress reporting and cancellation via `AtomicBool`.
 pub struct BlurFacesUseCase {
     reader: Box<dyn VideoReader>,
     writer: Box<dyn VideoWriter>,
@@ -62,7 +66,7 @@ impl BlurFacesUseCase {
         }
     }
 
-    /// Executes the pipeline: read → detect → buffer → merge → blur → write.
+    /// Executes the pipeline: reader thread → detect → buffer → merge → blur → writer thread.
     pub fn execute(
         &mut self,
         metadata: &VideoMetadata,
@@ -74,50 +78,156 @@ impl BlurFacesUseCase {
 
         self.writer.open(output_path, metadata)?;
 
-        // Collect frames to avoid borrow conflict between reader and detector
-        let all_frames: Vec<Frame> = self.reader.frames().collect::<Result<Vec<_>, _>>()?;
+        // --- Reader thread: reads frames and sends over bounded channel ---
+        let (frame_tx, frame_rx) = crossbeam_channel::bounded::<
+            Result<Frame, Box<dyn std::error::Error + Send + Sync>>,
+        >(CHANNEL_CAPACITY);
 
+        // SAFETY: VideoReader is Send. We move it to the reader thread and
+        // return it when done via a channel.
+        let mut reader = std::mem::replace(&mut self.reader, Box::new(NullReader));
+        let cancelled_reader = self.cancelled.clone();
+
+        let reader_handle = std::thread::spawn(move || {
+            let frame_iter = reader.frames();
+            for frame_result in frame_iter {
+                if cancelled_reader.load(Ordering::Relaxed) {
+                    break;
+                }
+                let mapped =
+                    frame_result.map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                        // Box<dyn Error> → Box<dyn Error + Send> via string conversion
+                        e.to_string().into()
+                    });
+                if frame_tx.send(mapped).is_err() {
+                    break; // receiver dropped
+                }
+            }
+            reader.close();
+            reader
+        });
+
+        // --- Writer thread: receives blurred frames and writes ---
+        let (write_tx, write_rx) = crossbeam_channel::bounded::<Frame>(CHANNEL_CAPACITY);
+
+        let mut writer = std::mem::replace(&mut self.writer, Box::new(NullWriter));
+
+        let writer_handle = std::thread::spawn(
+            move || -> Result<Box<dyn VideoWriter>, Box<dyn std::error::Error + Send + Sync>> {
+                for frame in write_rx {
+                    writer.write(&frame).map_err(
+                        |e| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() },
+                    )?;
+                }
+                Ok(writer)
+            },
+        );
+
+        // --- Main thread: detect → buffer → merge → blur ---
         let mut buffer: VecDeque<(Frame, Vec<Region>)> = VecDeque::new();
         let mut frames_processed: usize = 0;
+        let mut main_error: Option<Box<dyn std::error::Error>> = None;
 
-        for frame in all_frames {
+        for frame_result in frame_rx {
             if self.cancelled.load(Ordering::Relaxed) {
                 break;
             }
 
-            let regions = self.detector.detect(&frame)?;
+            let frame = match frame_result {
+                Ok(f) => f,
+                Err(e) => {
+                    main_error = Some(e.to_string().into());
+                    break;
+                }
+            };
+
+            let regions = match self.detector.detect(&frame) {
+                Ok(r) => r,
+                Err(e) => {
+                    main_error = Some(e);
+                    break;
+                }
+            };
             let filtered =
                 filter_regions(&regions, self.blur_ids.as_ref(), self.exclude_ids.as_ref());
 
             buffer.push_back((frame, filtered));
 
             if buffer.len() > self.lookahead {
-                self.flush_oldest(
+                if let Err(e) = self.flush_oldest(
                     &mut buffer,
                     frame_w,
                     frame_h,
+                    &write_tx,
                     &mut frames_processed,
                     total_frames,
-                )?;
+                ) {
+                    main_error = Some(e);
+                    break;
+                }
             }
         }
 
         // Flush remaining buffered frames
-        while !buffer.is_empty() {
-            if self.cancelled.load(Ordering::Relaxed) {
-                break;
+        if main_error.is_none() {
+            while !buffer.is_empty() {
+                if self.cancelled.load(Ordering::Relaxed) {
+                    break;
+                }
+                if let Err(e) = self.flush_oldest(
+                    &mut buffer,
+                    frame_w,
+                    frame_h,
+                    &write_tx,
+                    &mut frames_processed,
+                    total_frames,
+                ) {
+                    main_error = Some(e);
+                    break;
+                }
             }
-            self.flush_oldest(
-                &mut buffer,
-                frame_w,
-                frame_h,
-                &mut frames_processed,
-                total_frames,
-            )?;
         }
 
-        self.writer.close()?;
+        // Signal writer thread to finish
+        drop(write_tx);
+
+        // Join reader thread, reclaim reader
+        match reader_handle.join() {
+            Ok(r) => self.reader = r,
+            Err(_) => {
+                if main_error.is_none() {
+                    main_error = Some("Reader thread panicked".into());
+                }
+            }
+        }
+
+        // Join writer thread, reclaim writer, close it
+        match writer_handle.join() {
+            Ok(Ok(mut w)) => {
+                if let Err(e) = w.close() {
+                    if main_error.is_none() {
+                        main_error = Some(e);
+                    }
+                }
+                self.writer = w;
+            }
+            Ok(Err(e)) => {
+                if main_error.is_none() {
+                    main_error = Some(e.to_string().into());
+                }
+            }
+            Err(_) => {
+                if main_error.is_none() {
+                    main_error = Some("Writer thread panicked".into());
+                }
+            }
+        }
+
         self.reader.close();
+
+        if let Some(e) = main_error {
+            return Err(e);
+        }
 
         Ok(())
     }
@@ -127,6 +237,7 @@ impl BlurFacesUseCase {
         buffer: &mut VecDeque<(Frame, Vec<Region>)>,
         frame_w: u32,
         frame_h: u32,
+        write_tx: &crossbeam_channel::Sender<Frame>,
         frames_processed: &mut usize,
         total_frames: usize,
     ) -> Result<(), Box<dyn std::error::Error>> {
@@ -140,7 +251,10 @@ impl BlurFacesUseCase {
             .merger
             .merge(&own_regions, &lookahead_regions, frame_w, frame_h);
         self.blurrer.blur(&mut frame, &merged)?;
-        self.writer.write(&frame)?;
+
+        write_tx
+            .send(frame)
+            .map_err(|_| "Writer channel closed unexpectedly")?;
 
         *frames_processed += 1;
         self.report_progress(*frames_processed, total_frames)?;
@@ -158,6 +272,44 @@ impl BlurFacesUseCase {
                 return Err("Cancelled".into());
             }
         }
+        Ok(())
+    }
+}
+
+/// Placeholder reader used while the real reader is moved to the reader thread.
+struct NullReader;
+
+impl VideoReader for NullReader {
+    fn open(&mut self, _path: &Path) -> Result<VideoMetadata, Box<dyn std::error::Error>> {
+        Err("NullReader".into())
+    }
+
+    fn frames(
+        &mut self,
+    ) -> Box<dyn Iterator<Item = Result<Frame, Box<dyn std::error::Error>>> + '_> {
+        Box::new(std::iter::empty())
+    }
+
+    fn close(&mut self) {}
+}
+
+/// Placeholder writer used while the real writer is moved to the writer thread.
+struct NullWriter;
+
+impl VideoWriter for NullWriter {
+    fn open(
+        &mut self,
+        _path: &Path,
+        _metadata: &VideoMetadata,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        Err("NullWriter".into())
+    }
+
+    fn write(&mut self, _frame: &Frame) -> Result<(), Box<dyn std::error::Error>> {
+        Err("NullWriter".into())
+    }
+
+    fn close(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
 }
