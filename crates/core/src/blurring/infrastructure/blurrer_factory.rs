@@ -20,11 +20,13 @@ pub enum BlurShape {
 /// backend is selected.
 pub fn create_blurrer(shape: BlurShape, kernel_size: usize) -> Box<dyn FrameBlurrer> {
     if let Some(ctx) = GpuContext::new() {
+        log::info!("Using GPU backend for {:?} blur (kernel_size={})", shape, kernel_size);
         match shape {
             BlurShape::Elliptical => Box::new(GpuEllipticalBlurrer::new(ctx, kernel_size as u32)),
             BlurShape::Rectangular => Box::new(GpuRectangularBlurrer::new(ctx, kernel_size as u32)),
         }
     } else {
+        log::info!("No GPU available, using CPU backend for {:?} blur (kernel_size={})", shape, kernel_size);
         match shape {
             BlurShape::Elliptical => Box::new(CpuEllipticalBlurrer::new(kernel_size)),
             BlurShape::Rectangular => Box::new(CpuRectangularBlurrer::new(kernel_size)),
