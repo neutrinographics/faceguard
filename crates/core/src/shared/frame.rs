@@ -1,3 +1,5 @@
+use ndarray::{ArrayView3, ArrayViewMut3};
+
 /// A single video/image frame with pixel data and sequence index.
 ///
 /// Data is stored as contiguous RGB bytes in row-major order.
@@ -51,6 +53,27 @@ impl Frame {
     pub fn index(&self) -> usize {
         self.index
     }
+
+    /// View pixel data as a 3D array (height, width, channels).
+    pub fn as_ndarray(&self) -> ArrayView3<'_, u8> {
+        let shape = (
+            self.height as usize,
+            self.width as usize,
+            self.channels as usize,
+        );
+        ArrayView3::from_shape(shape, &self.data).expect("Frame data length must match dimensions")
+    }
+
+    /// Mutable view of pixel data as a 3D array (height, width, channels).
+    pub fn as_ndarray_mut(&mut self) -> ArrayViewMut3<'_, u8> {
+        let shape = (
+            self.height as usize,
+            self.width as usize,
+            self.channels as usize,
+        );
+        ArrayViewMut3::from_shape(shape, &mut self.data)
+            .expect("Frame data length must match dimensions")
+    }
 }
 
 #[cfg(test)]
@@ -91,5 +114,36 @@ mod tests {
     fn test_mismatched_data_length_panics_in_debug() {
         let data = vec![0u8; 10]; // wrong size for 2x2x3
         Frame::new(data, 2, 2, 3, 0);
+    }
+
+    #[test]
+    fn test_as_ndarray_shape() {
+        let data = vec![0u8; 24]; // 2x4x3
+        let frame = Frame::new(data, 4, 2, 3, 0);
+        let arr = frame.as_ndarray();
+        assert_eq!(arr.shape(), &[2, 4, 3]); // (height, width, channels)
+    }
+
+    #[test]
+    fn test_as_ndarray_pixel_access() {
+        // 2x2 RGB: set pixel (row=1, col=0) to red
+        let mut data = vec![0u8; 12];
+        data[6] = 255; // row=1, col=0, R
+        let frame = Frame::new(data, 2, 2, 3, 0);
+        let arr = frame.as_ndarray();
+        assert_eq!(arr[[1, 0, 0]], 255); // R
+        assert_eq!(arr[[1, 0, 1]], 0); // G
+        assert_eq!(arr[[1, 0, 2]], 0); // B
+    }
+
+    #[test]
+    fn test_as_ndarray_mut_modification() {
+        let data = vec![0u8; 12]; // 2x2x3
+        let mut frame = Frame::new(data, 2, 2, 3, 0);
+        {
+            let mut arr = frame.as_ndarray_mut();
+            arr[[0, 1, 2]] = 128; // row=0, col=1, B channel
+        }
+        assert_eq!(frame.as_ndarray()[[0, 1, 2]], 128);
     }
 }
