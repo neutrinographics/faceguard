@@ -11,6 +11,9 @@ ndarray = { workspace = true }
 thiserror = { workspace = true }
 dirs = { workspace = true }
 reqwest = { workspace = true }
+wgpu = { workspace = true }
+pollster = { workspace = true }
+bytemuck = { workspace = true }
 
 [dev-dependencies]
 rstest = { workspace = true }
