@@ -14,7 +14,8 @@
       "Bash(cargo fmt:*)",
       "Bash(cargo clippy:*)",
       "Bash(cargo check:*)",
-      "Bash(export PATH=\"$HOME/.cargo/bin:/usr/bin:/usr/local/bin:/opt/homebrew/bin:$PATH\")"
+      "Bash(export PATH=\"$HOME/.cargo/bin:/usr/bin:/usr/local/bin:/opt/homebrew/bin:$PATH\")",
+      "Bash($HOME/.cargo/bin/cargo test)"
     ]
   }
 }
