@@ -29,6 +29,8 @@ image = "0.25"
 ffmpeg-next = "7"
 crossbeam-channel = "0.5"
 ort = { version = "2.0.0-rc.11", features = ["ndarray"] }
+clap = { version = "4", features = ["derive"] }
+env_logger = "0.11"
 
 [profile.release]
 lto = true
