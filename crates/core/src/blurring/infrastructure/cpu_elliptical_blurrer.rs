@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use crate::blurring::domain::frame_blurrer::FrameBlurrer;
 use crate::shared::frame::Frame;
 use crate::shared::region::Region;
@@ -14,8 +16,12 @@ const DEFAULT_KERNEL_SIZE: usize = 201;
 /// the blur extends smoothly off frame edges.
 pub struct CpuEllipticalBlurrer {
     kernel_size: usize,
+    kernel: Vec<f32>,
     scale: usize,
     small_k: usize,
+    small_kernel: Vec<f32>,
+    roi_buf: RefCell<Vec<u8>>,
+    blur_temp: RefCell<Vec<f32>>,
 }
 
 impl CpuEllipticalBlurrer {
@@ -24,8 +30,12 @@ impl CpuEllipticalBlurrer {
         let small_k = (kernel_size / scale) | 1; // ensure odd
         Self {
             kernel_size,
+            kernel: gaussian::gaussian_kernel_1d(kernel_size),
             scale,
             small_k,
+            small_kernel: gaussian::gaussian_kernel_1d(small_k),
+            roi_buf: RefCell::new(Vec::new()),
+            blur_temp: RefCell::new(Vec::new()),
         }
     }
 }
@@ -56,8 +66,10 @@ impl FrameBlurrer for CpuEllipticalBlurrer {
                 continue;
             }
 
-            // Extract ROI
-            let mut roi = vec![0u8; rw * rh * channels];
+            // Extract ROI (reuse buffer across regions)
+            let mut roi = self.roi_buf.borrow_mut();
+            let roi_size = rw * rh * channels;
+            roi.resize(roi_size, 0);
             for row in 0..rh {
                 let src_offset = ((ry + row) * fw + rx) * channels;
                 let dst_offset = row * rw * channels;
@@ -66,27 +78,31 @@ impl FrameBlurrer for CpuEllipticalBlurrer {
             }
 
             // Blur ROI (with downscale optimization for large kernels)
-            let blurred_roi = if self.scale <= 1 || rh < self.scale * 2 || rw < self.scale * 2 {
-                gaussian::separable_gaussian_blur(&mut roi, rw, rh, channels, self.kernel_size);
-                roi
+            let mut temp = self.blur_temp.borrow_mut();
+            if self.scale <= 1 || rh < self.scale * 2 || rw < self.scale * 2 {
+                gaussian::separable_gaussian_blur_with_kernel(&mut roi, rw, rh, channels, &self.kernel, &mut temp);
             } else {
                 let (mut small, sw, sh) = gaussian::downscale(&roi, rw, rh, channels, self.scale);
-                gaussian::separable_gaussian_blur(&mut small, sw, sh, channels, self.small_k);
-                gaussian::upscale(&small, sw, sh, channels, rw, rh)
-            };
+                gaussian::separable_gaussian_blur_with_kernel(&mut small, sw, sh, channels, &self.small_kernel, &mut temp);
+                let upscaled = gaussian::upscale(&small, sw, sh, channels, rw, rh);
+                roi[..roi_size].copy_from_slice(&upscaled);
+            }
 
             // Get ellipse geometry from region
             let (ecx, ecy) = r.ellipse_center_in_roi();
             let (semi_a, semi_b) = r.ellipse_axes();
+            let inv_a_sq = if semi_a > 0.0 { 1.0 / (semi_a * semi_a) } else { 0.0 };
+            let inv_b_sq = if semi_b > 0.0 { 1.0 / (semi_b * semi_b) } else { 0.0 };
+            let ellipse_valid = semi_a > 0.0 && semi_b > 0.0;
 
             // Composite blurred pixels within ellipse mask back into frame
             for row in 0..rh {
                 for col in 0..rw {
-                    // Ellipse SDF: ((x-cx)/a)^2 + ((y-cy)/b)^2 <= 1
+                    // Ellipse SDF: (dx^2 * inv_a_sq) + (dy^2 * inv_b_sq) <= 1
                     let dx = col as f64 - ecx;
                     let dy = row as f64 - ecy;
-                    let ellipse_dist = if semi_a > 0.0 && semi_b > 0.0 {
-                        (dx / semi_a) * (dx / semi_a) + (dy / semi_b) * (dy / semi_b)
+                    let ellipse_dist = if ellipse_valid {
+                        dx * dx * inv_a_sq + dy * dy * inv_b_sq
                     } else {
                         f64::MAX
                     };
@@ -95,7 +111,7 @@ impl FrameBlurrer for CpuEllipticalBlurrer {
                         let frame_offset = ((ry + row) * fw + (rx + col)) * channels;
                         let roi_offset = (row * rw + col) * channels;
                         data[frame_offset..frame_offset + channels]
-                            .copy_from_slice(&blurred_roi[roi_offset..roi_offset + channels]);
+                            .copy_from_slice(&roi[roi_offset..roi_offset + channels]);
                     }
                 }
             }

@@ -1,8 +1,10 @@
+use std::sync::Arc;
+
 use crate::blurring::domain::frame_blurrer::FrameBlurrer;
 use crate::shared::frame::Frame;
 use crate::shared::region::Region;
 
-use super::gpu_context::GpuContext;
+use super::gpu_context::{GpuContext, RoiDescriptor};
 
 /// Default kernel size for GPU Gaussian blur.
 const DEFAULT_KERNEL_SIZE: u32 = 201;
@@ -13,16 +15,16 @@ const DEFAULT_KERNEL_SIZE: u32 = 201;
 /// Uses the Region's edge-aware ellipse geometry so the blur extends
 /// smoothly off frame edges.
 pub struct GpuEllipticalBlurrer {
-    ctx: GpuContext,
+    ctx: Arc<GpuContext>,
     kernel_size: u32,
 }
 
 impl GpuEllipticalBlurrer {
-    pub fn new(ctx: GpuContext, kernel_size: u32) -> Self {
+    pub fn new(ctx: Arc<GpuContext>, kernel_size: u32) -> Self {
         Self { ctx, kernel_size }
     }
 
-    pub fn with_default_kernel(ctx: GpuContext) -> Self {
+    pub fn with_default_kernel(ctx: Arc<GpuContext>) -> Self {
         Self::new(ctx, DEFAULT_KERNEL_SIZE)
     }
 }
@@ -41,6 +43,10 @@ impl FrameBlurrer for GpuEllipticalBlurrer {
         let channels = frame.channels() as usize;
         let data = frame.data_mut();
 
+        // Build ROI descriptors and track region geometry for unpacking.
+        let mut descriptors: Vec<RoiDescriptor> = Vec::with_capacity(regions.len());
+        let mut region_info: Vec<(usize, usize, usize, usize)> = Vec::with_capacity(regions.len());
+
         for r in regions {
             let rx = r.x.max(0) as usize;
             let ry = r.y.max(0) as usize;
@@ -51,11 +57,9 @@ impl FrameBlurrer for GpuEllipticalBlurrer {
                 continue;
             }
 
-            // Get ellipse geometry from region
             let (ecx, ecy) = r.ellipse_center_in_roi();
             let (semi_a, semi_b) = r.ellipse_axes();
 
-            // Extract ROI and pack into RGBA u32
             let mut packed: Vec<u32> = Vec::with_capacity(rw * rh);
             for row in 0..rh {
                 for col in 0..rw {
@@ -75,20 +79,25 @@ impl FrameBlurrer for GpuEllipticalBlurrer {
                 }
             }
 
-            // Run GPU blur with ellipse mask
-            let result = self.ctx.blur_roi(
-                &packed,
-                rw as u32,
-                rh as u32,
-                self.kernel_size,
-                ecx as f32,
-                ecy as f32,
-                semi_a as f32,
-                semi_b as f32,
-                true,
-            );
+            descriptors.push(RoiDescriptor {
+                pixels: packed,
+                width: rw as u32,
+                height: rh as u32,
+                kernel_size: self.kernel_size,
+                ellipse_cx: ecx as f32,
+                ellipse_cy: ecy as f32,
+                ellipse_a: semi_a as f32,
+                ellipse_b: semi_b as f32,
+                use_ellipse: true,
+            });
+            region_info.push((rx, ry, rw, rh));
+        }
 
-            // Unpack and write back
+        // Batch blur all regions with single GPU readback.
+        let results = self.ctx.blur_rois(&descriptors);
+
+        // Unpack all results back to frame.
+        for (result, &(rx, ry, rw, rh)) in results.iter().zip(region_info.iter()) {
             for row in 0..rh {
                 for col in 0..rw {
                     let pixel = result[row * rw + col];
@@ -131,8 +140,8 @@ mod tests {
         }
     }
 
-    fn try_gpu_context() -> Option<GpuContext> {
-        GpuContext::new()
+    fn try_gpu_context() -> Option<Arc<GpuContext>> {
+        GpuContext::new().map(Arc::new)
     }
 
     #[test]

@@ -8,10 +8,17 @@ use crate::video::domain::video_reader::VideoReader;
 ///
 /// Treats the image as a one-frame video with `fps=0` and `total_frames=1`,
 /// allowing the pipeline to process images and videos uniformly.
+///
+/// Uses ffmpeg for decoding, which is significantly faster than the pure-Rust
+/// `image` crate for large images (e.g. 4032x3024 JPEG).
 pub struct ImageFileReader {
     frame: Option<Frame>,
     metadata: Option<VideoMetadata>,
 }
+
+// Safety: ImageFileReader is only used from a single thread at a time.
+// The raw pointers inside ffmpeg types are not shared across threads.
+unsafe impl Send for ImageFileReader {}
 
 impl ImageFileReader {
     pub fn new() -> Self {
@@ -30,13 +37,87 @@ impl Default for ImageFileReader {
 
 impl VideoReader for ImageFileReader {
     fn open(&mut self, path: &Path) -> Result<VideoMetadata, Box<dyn std::error::Error>> {
-        let img = image::open(path)?;
-        let rgb = img.to_rgb8();
-        let width = rgb.width();
-        let height = rgb.height();
-        let data = rgb.into_raw();
+        ffmpeg_next::init()?;
 
-        self.frame = Some(Frame::new(data, width, height, 3, 0));
+        let mut ictx = ffmpeg_next::format::input(path)?;
+
+        let stream = ictx
+            .streams()
+            .best(ffmpeg_next::media::Type::Video)
+            .ok_or("No image data found")?;
+
+        let codec_ctx =
+            ffmpeg_next::codec::context::Context::from_parameters(stream.parameters())?;
+        let mut decoder = codec_ctx.decoder().video()?;
+
+        let width = decoder.width();
+        let height = decoder.height();
+
+        // Decode the single frame
+        let mut scaler = ffmpeg_next::software::scaling::Context::get(
+            decoder.format(),
+            width,
+            height,
+            ffmpeg_next::format::Pixel::RGB24,
+            width,
+            height,
+            ffmpeg_next::software::scaling::Flags::BILINEAR,
+        )?;
+
+        let video_stream_index = stream.index();
+        let mut decoded_frame = None;
+
+        // Feed packets to decoder
+        for (stream, packet) in ictx.packets() {
+            if stream.index() != video_stream_index {
+                continue;
+            }
+            decoder.send_packet(&packet)?;
+            let mut video_frame = ffmpeg_next::util::frame::video::Video::empty();
+            if decoder.receive_frame(&mut video_frame).is_ok() {
+                let mut rgb_frame = ffmpeg_next::util::frame::video::Video::empty();
+                scaler.run(&video_frame, &mut rgb_frame)?;
+
+                let stride = rgb_frame.stride(0);
+                let data = rgb_frame.data(0);
+
+                let mut pixels = Vec::with_capacity((width * height * 3) as usize);
+                for row in 0..height as usize {
+                    let row_start = row * stride;
+                    let row_end = row_start + (width as usize * 3);
+                    pixels.extend_from_slice(&data[row_start..row_end]);
+                }
+
+                decoded_frame = Some(Frame::new(pixels, width, height, 3, 0));
+                break;
+            }
+        }
+
+        // Flush decoder if we haven't got a frame yet
+        if decoded_frame.is_none() {
+            let _ = decoder.send_eof();
+            let mut video_frame = ffmpeg_next::util::frame::video::Video::empty();
+            if decoder.receive_frame(&mut video_frame).is_ok() {
+                let mut rgb_frame = ffmpeg_next::util::frame::video::Video::empty();
+                scaler.run(&video_frame, &mut rgb_frame)?;
+
+                let stride = rgb_frame.stride(0);
+                let data = rgb_frame.data(0);
+
+                let mut pixels = Vec::with_capacity((width * height * 3) as usize);
+                for row in 0..height as usize {
+                    let row_start = row * stride;
+                    let row_end = row_start + (width as usize * 3);
+                    pixels.extend_from_slice(&data[row_start..row_end]);
+                }
+
+                decoded_frame = Some(Frame::new(pixels, width, height, 3, 0));
+            }
+        }
+
+        let frame = decoded_frame.ok_or("Failed to decode image")?;
+        self.frame = Some(frame);
+
         let metadata = VideoMetadata {
             width,
             height,

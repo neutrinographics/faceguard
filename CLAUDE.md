@@ -41,9 +41,8 @@ crates/
 │       ├── lib.rs
 │       ├── shared/                          # Cross-cutting domain entities
 │       │   ├── frame.rs                     # Frame entity
-│       │   ├── region.rs                    # Region entity (immutable struct)
-│       │   ├── video_metadata.rs            # VideoMetadata entity
-│       │   └── model_resolver.rs            # Model path resolution + download
+│       │   ├── region.rs                    # Region entity + filter/dedup logic
+│       │   └── video_metadata.rs            # VideoMetadata entity
 │       ├── detection/                       # Face detection feature slice
 │       │   ├── domain/                      # Pure business logic (traits + entities)
 │       │   └── infrastructure/              # External library implementations

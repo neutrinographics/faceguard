@@ -7,24 +7,25 @@ use std::thread;
 use crossbeam_channel::{Receiver, Sender};
 
 use video_blur_core::blurring::infrastructure::blurrer_factory;
+use video_blur_core::blurring::infrastructure::gpu_context::GpuContext;
 use video_blur_core::detection::domain::face_region_builder::{FaceRegionBuilder, DEFAULT_PADDING};
 use video_blur_core::detection::domain::region_merger::RegionMerger;
 use video_blur_core::detection::domain::region_smoother::{RegionSmoother, DEFAULT_ALPHA};
 use video_blur_core::detection::infrastructure::bytetrack_tracker::ByteTracker;
 use video_blur_core::detection::infrastructure::cached_face_detector::CachedFaceDetector;
-use video_blur_core::detection::infrastructure::model_resolver;
 use video_blur_core::detection::infrastructure::onnx_yolo_detector::OnnxYoloDetector;
 use video_blur_core::detection::infrastructure::skip_frame_detector::SkipFrameDetector;
 use video_blur_core::pipeline::blur_faces_use_case::BlurFacesUseCase;
 use video_blur_core::pipeline::blur_image_use_case::BlurImageUseCase;
-use video_blur_core::shared::constants::{
-    IMAGE_EXTENSIONS, TRACKER_MAX_LOST, YOLO_MODEL_NAME, YOLO_MODEL_URL,
-};
+use video_blur_core::pipeline::infrastructure::threaded_pipeline_executor::ThreadedPipelineExecutor;
+use video_blur_core::shared::constants::{IMAGE_EXTENSIONS, TRACKER_MAX_LOST};
 use video_blur_core::shared::region::Region;
 use video_blur_core::video::infrastructure::ffmpeg_reader::FfmpegReader;
 use video_blur_core::video::infrastructure::ffmpeg_writer::FfmpegWriter;
 use video_blur_core::video::infrastructure::image_file_reader::ImageFileReader;
 use video_blur_core::video::infrastructure::image_file_writer::ImageFileWriter;
+
+use super::model_cache::ModelCache;
 
 /// Messages sent from the worker thread to the UI.
 #[derive(Debug, Clone)]
@@ -37,7 +38,6 @@ pub enum WorkerMessage {
 }
 
 /// Parameters for a blur job.
-#[derive(Clone)]
 pub struct BlurParams {
     pub input_path: PathBuf,
     pub output_path: PathBuf,
@@ -46,9 +46,13 @@ pub struct BlurParams {
     pub blur_strength: u32,
     pub lookahead: u32,
     /// Cached detection results from preview pass (skip re-detecting).
-    pub detection_cache: Option<HashMap<usize, Vec<Region>>>,
+    pub detection_cache: Option<Arc<HashMap<usize, Vec<Region>>>>,
     /// If set, only blur these face IDs. None = blur all.
     pub blur_ids: Option<HashSet<u32>>,
+    /// Shared model cache for pre-loaded model paths.
+    pub model_cache: Arc<ModelCache>,
+    /// Pre-built GPU context for blur compute shaders (avoids per-job init).
+    pub gpu_context: Option<Arc<GpuContext>>,
 }
 
 fn is_image(path: &std::path::Path) -> bool {
@@ -89,19 +93,20 @@ fn run_blur(
 
     // Build detector: use cached if available, otherwise fresh
     let detector: Box<dyn video_blur_core::detection::domain::face_detector::FaceDetector> =
-        if let Some(cache) = params.detection_cache.clone() {
-            Box::new(CachedFaceDetector::new(cache))
+        if let Some(ref cache) = params.detection_cache {
+            Box::new(CachedFaceDetector::new(Arc::clone(cache)))
         } else {
-            // Resolve model
+            // Wait for model (pre-loaded at startup or download in progress)
             let tx_dl = tx.clone();
-            let model_path = model_resolver::resolve(
-                YOLO_MODEL_NAME,
-                YOLO_MODEL_URL,
-                None,
-                Some(Box::new(move |downloaded, total| {
-                    let _ = tx_dl.send(WorkerMessage::DownloadProgress(downloaded, total));
-                })),
-            )?;
+            let model_path = params
+                .model_cache
+                .wait_for_yolo(
+                    &|dl, total| {
+                        let _ = tx_dl.send(WorkerMessage::DownloadProgress(dl, total));
+                    },
+                    cancelled,
+                )
+                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
 
             if cancelled.load(Ordering::Relaxed) {
                 return Err("Cancelled".into());
@@ -111,17 +116,31 @@ fn run_blur(
             let region_builder =
                 FaceRegionBuilder::new(DEFAULT_PADDING, Some(Box::new(smoother)));
             let tracker = ByteTracker::new(TRACKER_MAX_LOST);
-            let det =
-                OnnxYoloDetector::new(&model_path, region_builder, tracker, confidence)?;
+            let det = match params.model_cache.get_yolo_session() {
+                Some((session, input_size)) => {
+                    log::info!("Blur: using shared YOLO session");
+                    OnnxYoloDetector::from_shared_session(
+                        session, input_size, region_builder, tracker, confidence,
+                    )
+                }
+                None => {
+                    log::info!("Blur: building new YOLO session from path");
+                    OnnxYoloDetector::new(&model_path, region_builder, tracker, confidence)?
+                }
+            };
             Box::new(SkipFrameDetector::new(Box::new(det), 2)?)
         };
 
-    // Build blurrer
+    // Build blurrer (reuse cached GPU context to avoid expensive re-initialization)
     let blur_shape = match params.blur_shape {
         crate::settings::BlurShape::Ellipse => blurrer_factory::BlurShape::Elliptical,
         crate::settings::BlurShape::Rect => blurrer_factory::BlurShape::Rectangular,
     };
-    let blurrer = blurrer_factory::create_blurrer(blur_shape, params.blur_strength as usize);
+    let blurrer = blurrer_factory::create_blurrer_with_context(
+        blur_shape,
+        params.blur_strength as usize,
+        params.gpu_context.clone(),
+    );
 
     if image_mode {
         // Image mode — no progress needed
@@ -148,6 +167,9 @@ fn run_blur(
             Box::new(FfmpegWriter::new());
         let merger = RegionMerger::new();
 
+        // Send initial progress so UI transitions from "Preparing..." immediately
+        let _ = tx.send(WorkerMessage::BlurProgress(0, metadata.total_frames));
+
         let tx_progress = tx.clone();
         let cancelled_progress = cancelled.clone();
         let progress: Box<dyn Fn(usize, usize) -> bool + Send> = Box::new(move |current, total| {
@@ -161,6 +183,7 @@ fn run_blur(
             detector,
             blurrer,
             merger,
+            Box::new(ThreadedPipelineExecutor::new()),
             Some(params.lookahead as usize),
             params.blur_ids.clone(),
             None,

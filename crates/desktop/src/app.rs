@@ -13,7 +13,10 @@ use crate::tabs;
 use crate::theme;
 use crate::widgets::faces_well::FacesWellState;
 use crate::workers::blur_worker::{self, BlurParams, WorkerMessage};
+use crate::workers::model_cache::ModelCache;
 use crate::workers::preview_worker::{self, PreviewMessage, PreviewParams};
+use video_blur_core::blurring::infrastructure::blurrer_factory;
+use video_blur_core::blurring::infrastructure::gpu_context::GpuContext;
 use video_blur_core::shared::region::Region;
 
 use iced::widget::operation;
@@ -105,7 +108,11 @@ pub struct App {
     pub processing: ProcessingState,
     pub faces_well: FacesWellState,
     /// Cached detection results from preview pass (for reuse in blur).
-    detection_cache: Option<HashMap<usize, Vec<Region>>>,
+    detection_cache: Option<Arc<HashMap<usize, Vec<Region>>>>,
+    /// Pre-built GPU context for blur compute shaders (None if no GPU available).
+    gpu_context: Option<Arc<GpuContext>>,
+    /// Pre-loaded model paths shared across workers.
+    model_cache: Arc<ModelCache>,
     preview_rx: Option<Receiver<PreviewMessage>>,
     worker_rx: Option<Receiver<WorkerMessage>>,
     worker_cancel: Option<Arc<AtomicBool>>,
@@ -122,6 +129,8 @@ impl App {
                 processing: ProcessingState::Idle,
                 faces_well: FacesWellState::new(),
                 detection_cache: None,
+                gpu_context: blurrer_factory::create_gpu_context(),
+                model_cache: ModelCache::new(),
                 preview_rx: None,
                 worker_rx: None,
                 worker_cancel: None,
@@ -217,6 +226,7 @@ impl App {
                     let params = PreviewParams {
                         input_path: input,
                         confidence: self.settings.confidence,
+                        model_cache: self.model_cache.clone(),
                     };
                     let (rx, cancel) = preview_worker::spawn(params);
                     self.preview_rx = Some(rx);
@@ -238,6 +248,8 @@ impl App {
                         lookahead: self.settings.lookahead,
                         detection_cache: self.detection_cache.clone(),
                         blur_ids,
+                        model_cache: self.model_cache.clone(),
+                        gpu_context: self.gpu_context.clone(),
                     };
                     let (rx, cancel) = blur_worker::spawn(params);
                     self.worker_rx = Some(rx);
@@ -269,7 +281,7 @@ impl App {
                         PreviewMessage::Complete(result) => {
                             self.faces_well
                                 .populate(result.crops, result.groups, result.temp_dir);
-                            self.detection_cache = Some(result.detection_cache);
+                            self.detection_cache = Some(Arc::new(result.detection_cache));
                             self.processing = ProcessingState::Previewed;
                             self.preview_rx = None;
                             self.worker_cancel = None;
@@ -456,7 +468,7 @@ impl App {
                 &self.faces_well,
                 &current_theme,
             ),
-            Tab::Settings => tabs::settings_tab::view(&self.settings),
+            Tab::Settings => tabs::settings_tab::view(&self.settings, self.gpu_context.is_some()),
             Tab::About => tabs::about_tab::view(fs),
         };
 

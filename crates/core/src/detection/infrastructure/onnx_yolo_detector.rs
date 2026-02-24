@@ -3,6 +3,7 @@
 /// Handles letterbox preprocessing, inference, NMS post-processing, ByteTrack
 /// tracking, and region building through the domain's `FaceRegionBuilder`.
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use crate::detection::domain::face_detector::FaceDetector;
 use crate::detection::domain::face_landmarks::FaceLandmarks;
@@ -29,11 +30,33 @@ const KEYPOINT_CONF_THRESH: f64 = 0.5;
 
 /// YOLO face detector backed by an ONNX Runtime session.
 pub struct OnnxYoloDetector {
-    session: ort::session::Session,
+    session: Arc<Mutex<ort::session::Session>>,
     region_builder: FaceRegionBuilder,
     tracker: ByteTracker,
     confidence: f64,
     input_size: u32,
+    /// Pre-allocated letterbox tensor reused across frames.
+    letterbox_buf: ndarray::Array4<f32>,
+}
+
+/// Extract the model input resolution from an ONNX session.
+/// Falls back to `DEFAULT_INPUT_SIZE` if the shape is dynamic or unreadable.
+pub fn session_input_size(session: &ort::session::Session) -> u32 {
+    session
+        .inputs()
+        .first()
+        .and_then(|input| {
+            if let ort::value::ValueType::Tensor { ref shape, .. } = input.dtype() {
+                if shape.len() >= 4 && shape[2] > 0 {
+                    Some(shape[2] as u32)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .unwrap_or(DEFAULT_INPUT_SIZE)
 }
 
 impl OnnxYoloDetector {
@@ -47,39 +70,59 @@ impl OnnxYoloDetector {
         tracker: ByteTracker,
         confidence: f64,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        let session = Self::build_session(model_path)?;
+        let input_size = session_input_size(&session);
+        let s = input_size as usize;
+        Ok(Self {
+            session: Arc::new(Mutex::new(session)),
+            region_builder,
+            tracker,
+            confidence,
+            input_size,
+            letterbox_buf: ndarray::Array4::<f32>::zeros((1, 3, s, s)),
+        })
+    }
+
+    /// Build an ONNX Runtime session from a model file.
+    ///
+    /// This is the expensive operation that can be performed ahead of time
+    /// (e.g. at app startup) so that detector construction is instant.
+    pub fn build_session(
+        model_path: &Path,
+    ) -> Result<ort::session::Session, Box<dyn std::error::Error>> {
+        let intra_threads = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
         let session = ort::session::Session::builder()?
             .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)?
             .with_inter_threads(1)?
+            .with_intra_threads(intra_threads)?
             .with_execution_providers([
                 ort::execution_providers::CoreMLExecutionProvider::default().build(),
             ])?
             .commit_from_file(model_path)?;
+        Ok(session)
+    }
 
-        // Try to read input size from model metadata (NCHW: [1, 3, H, W])
-        let input_size = session
-            .inputs()
-            .first()
-            .and_then(|input| {
-                if let ort::value::ValueType::Tensor { ref shape, .. } = input.dtype() {
-                    // shape is [N, C, H, W] — use H (they should be equal for square input)
-                    if shape.len() >= 4 && shape[2] > 0 {
-                        Some(shape[2] as u32)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(DEFAULT_INPUT_SIZE);
-
-        Ok(Self {
+    /// Create a detector from a pre-built shared ONNX session.
+    ///
+    /// `input_size` should be computed via [`session_input_size()`] at build time.
+    pub fn from_shared_session(
+        session: Arc<Mutex<ort::session::Session>>,
+        input_size: u32,
+        region_builder: FaceRegionBuilder,
+        tracker: ByteTracker,
+        confidence: f64,
+    ) -> Self {
+        let s = input_size as usize;
+        Self {
             session,
             region_builder,
             tracker,
             confidence,
             input_size,
-        })
+            letterbox_buf: ndarray::Array4::<f32>::zeros((1, 3, s, s)),
+        }
     }
 }
 
@@ -88,96 +131,98 @@ impl FaceDetector for OnnxYoloDetector {
         let fw = frame.width();
         let fh = frame.height();
 
-        // 1. Preprocess: letterbox + normalize → NCHW float32
-        let (input_tensor, scale, pad_x, pad_y) = letterbox(frame, self.input_size);
+        // 1. Preprocess: letterbox + normalize → NCHW float32 (reuses pre-allocated buffer)
+        let (scale, pad_x, pad_y) = letterbox_into(frame, self.input_size, &mut self.letterbox_buf);
 
-        // 2. Inference
-        let input_value = ort::value::Tensor::from_array(input_tensor)?;
-        let outputs = self.session.run(ort::inputs![input_value])?;
-        if outputs.len() == 0 {
-            return Err("YOLO model produced no outputs".into());
-        }
-        let tensor = outputs[0].try_extract_array::<f32>()?;
-        let shape = tensor.shape();
-
-        // YOLO output shape is [1, num_features, num_detections] (transposed)
-        // or [1, num_detections, num_features]. Handle both.
-        let (num_dets, num_feats) = if shape.len() == 3 {
-            if shape[1] < shape[2] {
-                // [1, features, detections] → transpose
-                (shape[2], shape[1])
-            } else {
-                (shape[1], shape[2])
+        // 2. Inference + parse detections (hold lock only while tensor data is needed)
+        let input_value = ort::value::TensorRef::from_array_view(self.letterbox_buf.view())?;
+        let confidence = self.confidence;
+        let filtered = {
+            let mut session = self
+                .session
+                .lock()
+                .map_err(|e| format!("Session lock poisoned: {e}"))?;
+            let outputs = session.run(ort::inputs![input_value])?;
+            if outputs.len() == 0 {
+                return Err("YOLO model produced no outputs".into());
             }
-        } else {
-            return Err(format!("Unexpected YOLO output shape: {shape:?}").into());
-        };
+            let tensor = outputs[0].try_extract_array::<f32>()?;
+            let shape = tensor.shape();
+            let data = tensor.as_slice().ok_or("Cannot get tensor slice")?;
 
-        let data = tensor.as_slice().ok_or("Cannot get tensor slice")?;
-        let transposed = shape.len() == 3 && shape[1] < shape[2];
-
-        // 3. Parse detections
-        let mut raw_dets = Vec::new();
-        for i in 0..num_dets {
-            let row = if transposed {
-                // Read column i from transposed layout
-                (0..num_feats)
-                    .map(|f| data[f * num_dets + i])
-                    .collect::<Vec<f32>>()
-            } else {
-                data[i * num_feats..(i + 1) * num_feats].to_vec()
-            };
-
-            // row format: [cx, cy, w, h, conf, kp0_x, kp0_y, kp0_conf, ...]
-            if row.len() < 5 {
-                continue;
-            }
-            let conf = row[4] as f64;
-            if conf < self.confidence {
-                continue;
-            }
-
-            let cx = row[0] as f64;
-            let cy = row[1] as f64;
-            let w = row[2] as f64;
-            let h = row[3] as f64;
-
-            // Convert from letterbox coords back to original frame coords
-            let x1 = ((cx - w / 2.0) - pad_x as f64) / scale;
-            let y1 = ((cy - h / 2.0) - pad_y as f64) / scale;
-            let x2 = ((cx + w / 2.0) - pad_x as f64) / scale;
-            let y2 = ((cy + h / 2.0) - pad_y as f64) / scale;
-
-            // Parse keypoints if available, filtering by confidence
-            let keypoints = if row.len() >= 5 + NUM_KEYPOINT_VALUES {
-                let mut pts = [(0.0f64, 0.0f64); 5];
-                for k in 0..5 {
-                    let kconf = row[5 + k * 3 + 2] as f64;
-                    if kconf >= KEYPOINT_CONF_THRESH {
-                        let kx = row[5 + k * 3] as f64;
-                        let ky = row[5 + k * 3 + 1] as f64;
-                        // Map keypoints from letterbox coords to original
-                        pts[k] = ((kx - pad_x as f64) / scale, (ky - pad_y as f64) / scale);
-                    }
-                    // else: pts[k] remains (0.0, 0.0), treated as invisible by FaceLandmarks
+            // YOLO output shape is [1, num_features, num_detections] (transposed)
+            // or [1, num_detections, num_features]. Handle both.
+            let (num_dets, num_feats) = if shape.len() == 3 {
+                if shape[1] < shape[2] {
+                    (shape[2], shape[1])
+                } else {
+                    (shape[1], shape[2])
                 }
-                Some(pts)
             } else {
-                None
+                return Err(format!("Unexpected YOLO output shape: {shape:?}").into());
             };
 
-            raw_dets.push(RawDetection {
-                x1,
-                y1,
-                x2,
-                y2,
-                confidence: conf,
-                keypoints,
-            });
-        }
+            let transposed = shape.len() == 3 && shape[1] < shape[2];
 
-        // 4. NMS
-        let filtered = nms(&mut raw_dets, NMS_IOU_THRESH);
+            // 3. Parse detections directly from tensor (no full copy)
+            let feat = |det_idx: usize, feat_idx: usize| -> f32 {
+                if transposed {
+                    data[feat_idx * num_dets + det_idx]
+                } else {
+                    data[det_idx * num_feats + feat_idx]
+                }
+            };
+
+            let mut raw_dets = Vec::new();
+            for i in 0..num_dets {
+                if num_feats < 5 {
+                    continue;
+                }
+                let conf = feat(i, 4) as f64;
+                if conf < confidence {
+                    continue;
+                }
+
+                let cx = feat(i, 0) as f64;
+                let cy = feat(i, 1) as f64;
+                let w = feat(i, 2) as f64;
+                let h = feat(i, 3) as f64;
+
+                // Convert from letterbox coords back to original frame coords
+                let x1 = ((cx - w / 2.0) - pad_x as f64) / scale;
+                let y1 = ((cy - h / 2.0) - pad_y as f64) / scale;
+                let x2 = ((cx + w / 2.0) - pad_x as f64) / scale;
+                let y2 = ((cy + h / 2.0) - pad_y as f64) / scale;
+
+                // Parse keypoints if available, filtering by confidence
+                let keypoints = if num_feats >= 5 + NUM_KEYPOINT_VALUES {
+                    let mut pts = [(0.0f64, 0.0f64); 5];
+                    for k in 0..5 {
+                        let kconf = feat(i, 5 + k * 3 + 2) as f64;
+                        if kconf >= KEYPOINT_CONF_THRESH {
+                            let kx = feat(i, 5 + k * 3) as f64;
+                            let ky = feat(i, 5 + k * 3 + 1) as f64;
+                            pts[k] = ((kx - pad_x as f64) / scale, (ky - pad_y as f64) / scale);
+                        }
+                    }
+                    Some(pts)
+                } else {
+                    None
+                };
+
+                raw_dets.push(RawDetection {
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    confidence: conf,
+                    keypoints,
+                });
+            }
+
+            // 4. NMS (still inside lock, but cheap compared to inference)
+            nms(&mut raw_dets, NMS_IOU_THRESH)
+        };
 
         // 5. Track
         let tracker_dets: Vec<TrackerDetection> = filtered
@@ -216,10 +261,11 @@ impl FaceDetector for OnnxYoloDetector {
 // Preprocessing
 // ---------------------------------------------------------------------------
 
-/// Letterbox-resize a frame to `target_size` × `target_size`.
+/// Letterbox-resize a frame into a pre-allocated `target_size` × `target_size` tensor.
 ///
-/// Returns `(NCHW float32 tensor, scale, pad_x, pad_y)`.
-fn letterbox(frame: &Frame, target_size: u32) -> (ndarray::Array4<f32>, f64, u32, u32) {
+/// The caller must provide a buffer of shape `[1, 3, target_size, target_size]`.
+/// Returns `(scale, pad_x, pad_y)`.
+fn letterbox_into(frame: &Frame, target_size: u32, buf: &mut ndarray::Array4<f32>) -> (f64, u32, u32) {
     let fw = frame.width() as f64;
     let fh = frame.height() as f64;
     let target = target_size as f64;
@@ -230,10 +276,9 @@ fn letterbox(frame: &Frame, target_size: u32) -> (ndarray::Array4<f32>, f64, u32
     let pad_x = (target_size - new_w) / 2;
     let pad_y = (target_size - new_h) / 2;
 
-    // Build padded image (filled with 114/255 gray, YOLO convention)
+    // Fill entire buffer with 114/255 gray (YOLO convention)
     let gray = 114.0f32 / 255.0;
-    let mut tensor =
-        ndarray::Array4::<f32>::from_elem((1, 3, target_size as usize, target_size as usize), gray);
+    buf.fill(gray);
 
     let src = frame.as_ndarray(); // [H, W, C] u8
     let src_h = frame.height() as usize;
@@ -247,12 +292,23 @@ fn letterbox(frame: &Frame, target_size: u32) -> (ndarray::Array4<f32>, f64, u32
             let ty = pad_y as usize + y;
             let tx = pad_x as usize + x;
             for c in 0..3 {
-                tensor[[0, c, ty, tx]] = src[[src_y, src_x, c]] as f32 / 255.0;
+                buf[[0, c, ty, tx]] = src[[src_y, src_x, c]] as f32 / 255.0;
             }
         }
     }
 
-    (tensor, scale, pad_x, pad_y)
+    (scale, pad_x, pad_y)
+}
+
+/// Letterbox-resize a frame to `target_size` × `target_size` (allocating variant for tests).
+///
+/// Returns `(NCHW float32 tensor, scale, pad_x, pad_y)`.
+#[cfg(test)]
+fn letterbox(frame: &Frame, target_size: u32) -> (ndarray::Array4<f32>, f64, u32, u32) {
+    let s = target_size as usize;
+    let mut buf = ndarray::Array4::<f32>::zeros((1, 3, s, s));
+    let (scale, pad_x, pad_y) = letterbox_into(frame, target_size, &mut buf);
+    (buf, scale, pad_x, pad_y)
 }
 
 // ---------------------------------------------------------------------------

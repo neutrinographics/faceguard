@@ -33,6 +33,101 @@ impl Default for FfmpegReader {
     }
 }
 
+/// Lazy iterator that decodes video frames one at a time, avoiding the need
+/// to buffer the entire video in memory before processing begins.
+struct FfmpegFrameIter<'a> {
+    ictx: &'a mut ffmpeg_next::format::context::Input,
+    decoder: ffmpeg_next::decoder::Video,
+    scaler: ffmpeg_next::software::scaling::Context,
+    width: u32,
+    height: u32,
+    video_stream_index: usize,
+    frame_index: usize,
+    flushing: bool,
+    done: bool,
+}
+
+impl<'a> FfmpegFrameIter<'a> {
+    /// Try to receive a decoded frame from the decoder, scale it to RGB24,
+    /// and return it as a `Frame`.
+    fn try_receive(&mut self) -> Option<Result<Frame, Box<dyn std::error::Error>>> {
+        let mut decoded = ffmpeg_next::util::frame::video::Video::empty();
+        if self.decoder.receive_frame(&mut decoded).is_ok() {
+            let mut rgb_frame = ffmpeg_next::util::frame::video::Video::empty();
+            if let Err(e) = self.scaler.run(&decoded, &mut rgb_frame) {
+                return Some(Err(Box::new(e)));
+            }
+
+            let stride = rgb_frame.stride(0);
+            let data = rgb_frame.data(0);
+            let width = self.width as usize;
+            let height = self.height as usize;
+
+            let mut pixels = Vec::with_capacity(width * height * 3);
+            for row in 0..height {
+                let row_start = row * stride;
+                let row_end = row_start + width * 3;
+                pixels.extend_from_slice(&data[row_start..row_end]);
+            }
+
+            let frame = Frame::new(pixels, self.width, self.height, 3, self.frame_index);
+            self.frame_index += 1;
+            Some(Ok(frame))
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a> Iterator for FfmpegFrameIter<'a> {
+    type Item = Result<Frame, Box<dyn std::error::Error>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
+
+        // First, try to receive any buffered decoded frames
+        if let Some(result) = self.try_receive() {
+            return Some(result);
+        }
+
+        if self.flushing {
+            // Already sent EOF, no more frames
+            self.done = true;
+            return None;
+        }
+
+        // Feed packets until we get a decoded frame
+        loop {
+            // Read next packet from the demuxer
+            let Some((stream, packet)) = self.ictx.packets().next() else {
+                // No more packets — flush the decoder
+                let _ = self.decoder.send_eof();
+                self.flushing = true;
+                // Drain any remaining buffered frames
+                if let Some(result) = self.try_receive() {
+                    return Some(result);
+                }
+                self.done = true;
+                return None;
+            };
+
+            if stream.index() != self.video_stream_index {
+                continue;
+            }
+
+            if self.decoder.send_packet(&packet).is_err() {
+                continue;
+            }
+
+            if let Some(result) = self.try_receive() {
+                return Some(result);
+            }
+        }
+    }
+}
+
 impl VideoReader for FfmpegReader {
     fn open(&mut self, path: &Path) -> Result<VideoMetadata, Box<dyn std::error::Error>> {
         ffmpeg_next::init()?;
@@ -96,12 +191,12 @@ impl VideoReader for FfmpegReader {
             .unwrap();
         let codec_ctx =
             ffmpeg_next::codec::context::Context::from_parameters(stream.parameters()).unwrap();
-        let mut decoder = codec_ctx.decoder().video().unwrap();
+        let decoder = codec_ctx.decoder().video().unwrap();
 
         let width = decoder.width();
         let height = decoder.height();
 
-        let mut scaler = ffmpeg_next::software::scaling::Context::get(
+        let scaler = ffmpeg_next::software::scaling::Context::get(
             decoder.format(),
             width,
             height,
@@ -113,76 +208,18 @@ impl VideoReader for FfmpegReader {
         .unwrap();
 
         let video_stream_index = self.video_stream_index;
-        let mut frame_index: usize = 0;
 
-        // Collect all packets for the video stream, then decode
-        let mut frames: Vec<Result<Frame, Box<dyn std::error::Error>>> = Vec::new();
-
-        // Process packets
-        let packets: Vec<_> = ictx
-            .packets()
-            .filter_map(|(stream, packet)| {
-                if stream.index() == video_stream_index {
-                    Some(packet)
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        for packet in &packets {
-            if decoder.send_packet(packet).is_err() {
-                continue;
-            }
-            let mut decoded = ffmpeg_next::util::frame::video::Video::empty();
-            while decoder.receive_frame(&mut decoded).is_ok() {
-                let mut rgb_frame = ffmpeg_next::util::frame::video::Video::empty();
-                if let Err(e) = scaler.run(&decoded, &mut rgb_frame) {
-                    frames.push(Err(Box::new(e)));
-                    continue;
-                }
-
-                let stride = rgb_frame.stride(0);
-                let data = rgb_frame.data(0);
-
-                // Copy pixel data, handling stride padding
-                let mut pixels = Vec::with_capacity((width * height * 3) as usize);
-                for row in 0..height as usize {
-                    let row_start = row * stride;
-                    let row_end = row_start + (width as usize * 3);
-                    pixels.extend_from_slice(&data[row_start..row_end]);
-                }
-
-                frames.push(Ok(Frame::new(pixels, width, height, 3, frame_index)));
-                frame_index += 1;
-            }
-        }
-
-        // Flush decoder
-        let _ = decoder.send_eof();
-        let mut decoded = ffmpeg_next::util::frame::video::Video::empty();
-        while decoder.receive_frame(&mut decoded).is_ok() {
-            let mut rgb_frame = ffmpeg_next::util::frame::video::Video::empty();
-            if let Err(e) = scaler.run(&decoded, &mut rgb_frame) {
-                frames.push(Err(Box::new(e)));
-                continue;
-            }
-
-            let stride = rgb_frame.stride(0);
-            let data = rgb_frame.data(0);
-
-            let mut pixels = Vec::with_capacity((width * height * 3) as usize);
-            for row in 0..height as usize {
-                let row_start = row * stride;
-                let row_end = row_start + (width as usize * 3);
-                pixels.extend_from_slice(&data[row_start..row_end]);
-            }
-
-            frames.push(Ok(Frame::new(pixels, width, height, 3, frame_index)));
-            frame_index += 1;
-        }
-
-        Box::new(frames.into_iter())
+        Box::new(FfmpegFrameIter {
+            ictx,
+            decoder,
+            scaler,
+            width,
+            height,
+            video_stream_index,
+            frame_index: 0,
+            flushing: false,
+            done: false,
+        })
     }
 
     fn close(&mut self) {

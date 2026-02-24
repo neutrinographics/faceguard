@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use crate::blurring::domain::frame_blurrer::FrameBlurrer;
 use crate::shared::frame::Frame;
 use crate::shared::region::Region;
@@ -14,8 +16,12 @@ const DEFAULT_KERNEL_SIZE: usize = 201;
 /// for large kernel sizes.
 pub struct CpuRectangularBlurrer {
     kernel_size: usize,
+    kernel: Vec<f32>,
     scale: usize,
     small_k: usize,
+    small_kernel: Vec<f32>,
+    roi_buf: RefCell<Vec<u8>>,
+    blur_temp: RefCell<Vec<f32>>,
 }
 
 impl CpuRectangularBlurrer {
@@ -24,8 +30,12 @@ impl CpuRectangularBlurrer {
         let small_k = (kernel_size / scale) | 1; // ensure odd
         Self {
             kernel_size,
+            kernel: gaussian::gaussian_kernel_1d(kernel_size),
             scale,
             small_k,
+            small_kernel: gaussian::gaussian_kernel_1d(small_k),
+            roi_buf: RefCell::new(Vec::new()),
+            blur_temp: RefCell::new(Vec::new()),
         }
     }
 }
@@ -56,8 +66,10 @@ impl FrameBlurrer for CpuRectangularBlurrer {
                 continue;
             }
 
-            // Extract ROI
-            let mut roi = vec![0u8; rw * rh * channels];
+            // Extract ROI (reuse buffer across regions)
+            let mut roi = self.roi_buf.borrow_mut();
+            let roi_size = rw * rh * channels;
+            roi.resize(roi_size, 0);
             for row in 0..rh {
                 let src_offset = ((ry + row) * fw + rx) * channels;
                 let dst_offset = row * rw * channels;
@@ -66,12 +78,14 @@ impl FrameBlurrer for CpuRectangularBlurrer {
             }
 
             // Blur ROI (with downscale optimization for large kernels)
+            let mut temp = self.blur_temp.borrow_mut();
             if self.scale <= 1 || rh < self.scale * 2 || rw < self.scale * 2 {
-                gaussian::separable_gaussian_blur(&mut roi, rw, rh, channels, self.kernel_size);
+                gaussian::separable_gaussian_blur_with_kernel(&mut roi, rw, rh, channels, &self.kernel, &mut temp);
             } else {
                 let (mut small, sw, sh) = gaussian::downscale(&roi, rw, rh, channels, self.scale);
-                gaussian::separable_gaussian_blur(&mut small, sw, sh, channels, self.small_k);
-                roi = gaussian::upscale(&small, sw, sh, channels, rw, rh);
+                gaussian::separable_gaussian_blur_with_kernel(&mut small, sw, sh, channels, &self.small_kernel, &mut temp);
+                let upscaled = gaussian::upscale(&small, sw, sh, channels, rw, rh);
+                roi[..roi_size].copy_from_slice(&upscaled);
             }
 
             // Write blurred ROI back

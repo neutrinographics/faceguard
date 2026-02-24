@@ -1,36 +1,32 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use crate::blurring::domain::frame_blurrer::FrameBlurrer;
 use crate::detection::domain::face_detector::FaceDetector;
 use crate::detection::domain::region_merger::RegionMerger;
-use crate::pipeline::region_filter::filter_regions;
-use crate::shared::frame::Frame;
-use crate::shared::region::Region;
 use crate::shared::video_metadata::VideoMetadata;
 use crate::video::domain::video_reader::VideoReader;
 use crate::video::domain::video_writer::VideoWriter;
 
+use super::pipeline_executor::{PipelineConfig, PipelineExecutor};
+
 /// Default number of frames to buffer for lookahead merging.
 const DEFAULT_LOOKAHEAD: usize = 5;
 
-/// Bounded channel capacity for reader → main and main → writer threads.
-const CHANNEL_CAPACITY: usize = 4;
-
 /// Orchestrates the full video blurring pipeline.
 ///
-/// Uses crossbeam bounded channels for pipelined I/O:
-/// - Reader thread → channel(4) → main thread (detect/buffer/merge/blur) → channel(4) → writer thread
-///
-/// Supports progress reporting and cancellation via `AtomicBool`.
+/// Delegates execution to a `PipelineExecutor` which handles threading
+/// and I/O scheduling. The use case is responsible for wiring together
+/// domain components and configuration.
 pub struct BlurFacesUseCase {
     reader: Box<dyn VideoReader>,
     writer: Box<dyn VideoWriter>,
     detector: Box<dyn FaceDetector>,
     blurrer: Box<dyn FrameBlurrer>,
     merger: RegionMerger,
+    executor: Box<dyn PipelineExecutor>,
     lookahead: usize,
     blur_ids: Option<HashSet<u32>>,
     exclude_ids: Option<HashSet<u32>>,
@@ -46,6 +42,7 @@ impl BlurFacesUseCase {
         detector: Box<dyn FaceDetector>,
         blurrer: Box<dyn FrameBlurrer>,
         merger: RegionMerger,
+        executor: Box<dyn PipelineExecutor>,
         lookahead: Option<usize>,
         blur_ids: Option<HashSet<u32>>,
         exclude_ids: Option<HashSet<u32>>,
@@ -58,6 +55,7 @@ impl BlurFacesUseCase {
             detector,
             blurrer,
             merger,
+            executor,
             lookahead: lookahead.unwrap_or(DEFAULT_LOOKAHEAD),
             blur_ids,
             exclude_ids,
@@ -66,234 +64,53 @@ impl BlurFacesUseCase {
         }
     }
 
-    /// Executes the pipeline: reader thread → detect → buffer → merge → blur → writer thread.
+    /// Executes the pipeline by delegating to the injected PipelineExecutor.
     pub fn execute(
         &mut self,
         metadata: &VideoMetadata,
         output_path: &Path,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let frame_w = metadata.width;
-        let frame_h = metadata.height;
-        let total_frames = metadata.total_frames;
+        let config = PipelineConfig {
+            lookahead: self.lookahead,
+            blur_ids: self.blur_ids.take(),
+            exclude_ids: self.exclude_ids.take(),
+            on_progress: self.on_progress.take(),
+            cancelled: self.cancelled.clone(),
+        };
 
-        self.writer.open(output_path, metadata)?;
+        let reader = std::mem::replace(&mut self.reader, Box::new(NullReader));
+        let writer = std::mem::replace(&mut self.writer, Box::new(NullWriter));
+        let detector = std::mem::replace(&mut self.detector, Box::new(NullDetector));
+        let blurrer = std::mem::replace(&mut self.blurrer, Box::new(NullBlurrer));
+        let merger = std::mem::take(&mut self.merger);
 
-        // --- Reader thread: reads frames and sends over bounded channel ---
-        let (frame_tx, frame_rx) = crossbeam_channel::bounded::<
-            Result<Frame, Box<dyn std::error::Error + Send + Sync>>,
-        >(CHANNEL_CAPACITY);
-
-        // SAFETY: VideoReader is Send. We move it to the reader thread and
-        // return it when done via a channel.
-        let mut reader = std::mem::replace(&mut self.reader, Box::new(NullReader));
-        let cancelled_reader = self.cancelled.clone();
-
-        let reader_handle = std::thread::spawn(move || {
-            let frame_iter = reader.frames();
-            for frame_result in frame_iter {
-                if cancelled_reader.load(Ordering::Relaxed) {
-                    break;
-                }
-                let mapped =
-                    frame_result.map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-                        // Box<dyn Error> → Box<dyn Error + Send> via string conversion
-                        e.to_string().into()
-                    });
-                if frame_tx.send(mapped).is_err() {
-                    break; // receiver dropped
-                }
-            }
-            reader.close();
-            reader
-        });
-
-        // --- Writer thread: receives blurred frames and writes ---
-        let (write_tx, write_rx) = crossbeam_channel::bounded::<Frame>(CHANNEL_CAPACITY);
-
-        let mut writer = std::mem::replace(&mut self.writer, Box::new(NullWriter));
-
-        let writer_handle = std::thread::spawn(
-            move || -> Result<Box<dyn VideoWriter>, Box<dyn std::error::Error + Send + Sync>> {
-                for frame in write_rx {
-                    writer.write(&frame).map_err(
-                        |e| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() },
-                    )?;
-                }
-                Ok(writer)
-            },
-        );
-
-        // --- Main thread: detect → buffer → merge → blur ---
-        let mut buffer: VecDeque<(Frame, Vec<Region>)> = VecDeque::new();
-        let mut frames_processed: usize = 0;
-        let mut main_error: Option<Box<dyn std::error::Error>> = None;
-
-        for frame_result in frame_rx {
-            if self.cancelled.load(Ordering::Relaxed) {
-                break;
-            }
-
-            let frame = match frame_result {
-                Ok(f) => f,
-                Err(e) => {
-                    main_error = Some(e.to_string().into());
-                    break;
-                }
-            };
-
-            let regions = match self.detector.detect(&frame) {
-                Ok(r) => r,
-                Err(e) => {
-                    main_error = Some(e);
-                    break;
-                }
-            };
-            let filtered =
-                filter_regions(&regions, self.blur_ids.as_ref(), self.exclude_ids.as_ref());
-
-            buffer.push_back((frame, filtered));
-
-            if buffer.len() > self.lookahead {
-                if let Err(e) = self.flush_oldest(
-                    &mut buffer,
-                    frame_w,
-                    frame_h,
-                    &write_tx,
-                    &mut frames_processed,
-                    total_frames,
-                ) {
-                    main_error = Some(e);
-                    break;
-                }
-            }
-        }
-
-        // Flush remaining buffered frames
-        if main_error.is_none() {
-            while !buffer.is_empty() {
-                if self.cancelled.load(Ordering::Relaxed) {
-                    break;
-                }
-                if let Err(e) = self.flush_oldest(
-                    &mut buffer,
-                    frame_w,
-                    frame_h,
-                    &write_tx,
-                    &mut frames_processed,
-                    total_frames,
-                ) {
-                    main_error = Some(e);
-                    break;
-                }
-            }
-        }
-
-        // Signal writer thread to finish
-        drop(write_tx);
-
-        // Join reader thread, reclaim reader
-        match reader_handle.join() {
-            Ok(r) => self.reader = r,
-            Err(_) => {
-                if main_error.is_none() {
-                    main_error = Some("Reader thread panicked".into());
-                }
-            }
-        }
-
-        // Join writer thread, reclaim writer, close it
-        match writer_handle.join() {
-            Ok(Ok(mut w)) => {
-                if let Err(e) = w.close() {
-                    if main_error.is_none() {
-                        main_error = Some(e);
-                    }
-                }
-                self.writer = w;
-            }
-            Ok(Err(e)) => {
-                if main_error.is_none() {
-                    main_error = Some(e.to_string().into());
-                }
-            }
-            Err(_) => {
-                if main_error.is_none() {
-                    main_error = Some("Writer thread panicked".into());
-                }
-            }
-        }
-
-        self.reader.close();
-
-        if let Some(e) = main_error {
-            return Err(e);
-        }
-
-        Ok(())
-    }
-
-    fn flush_oldest(
-        &mut self,
-        buffer: &mut VecDeque<(Frame, Vec<Region>)>,
-        frame_w: u32,
-        frame_h: u32,
-        write_tx: &crossbeam_channel::Sender<Frame>,
-        frames_processed: &mut usize,
-        total_frames: usize,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let (mut frame, own_regions) = buffer.pop_front().unwrap();
-
-        // Collect lookahead regions as Vec<Vec<Region>> for merger
-        let lookahead_regions: Vec<Vec<Region>> =
-            buffer.iter().map(|(_, regions)| regions.clone()).collect();
-
-        let merged = self
-            .merger
-            .merge(&own_regions, &lookahead_regions, frame_w, frame_h);
-        self.blurrer.blur(&mut frame, &merged)?;
-
-        write_tx
-            .send(frame)
-            .map_err(|_| "Writer channel closed unexpectedly")?;
-
-        *frames_processed += 1;
-        self.report_progress(*frames_processed, total_frames)?;
-
-        Ok(())
-    }
-
-    fn report_progress(
-        &self,
-        current: usize,
-        total: usize,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(ref callback) = self.on_progress {
-            if !callback(current, total) {
-                return Err("Cancelled".into());
-            }
-        }
-        Ok(())
+        self.executor
+            .execute(reader, writer, detector, blurrer, merger, metadata, output_path, config)
     }
 }
 
-/// Placeholder reader used while the real reader is moved to the reader thread.
+// --- Placeholder types for std::mem::replace ---
+
 struct NullReader;
 
 impl VideoReader for NullReader {
-    fn open(&mut self, _path: &Path) -> Result<VideoMetadata, Box<dyn std::error::Error>> {
+    fn open(
+        &mut self,
+        _path: &Path,
+    ) -> Result<VideoMetadata, Box<dyn std::error::Error>> {
         Err("NullReader".into())
     }
 
     fn frames(
         &mut self,
-    ) -> Box<dyn Iterator<Item = Result<Frame, Box<dyn std::error::Error>>> + '_> {
+    ) -> Box<dyn Iterator<Item = Result<crate::shared::frame::Frame, Box<dyn std::error::Error>>> + '_>
+    {
         Box::new(std::iter::empty())
     }
 
     fn close(&mut self) {}
 }
 
-/// Placeholder writer used while the real writer is moved to the writer thread.
 struct NullWriter;
 
 impl VideoWriter for NullWriter {
@@ -305,7 +122,10 @@ impl VideoWriter for NullWriter {
         Err("NullWriter".into())
     }
 
-    fn write(&mut self, _frame: &Frame) -> Result<(), Box<dyn std::error::Error>> {
+    fn write(
+        &mut self,
+        _frame: &crate::shared::frame::Frame,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         Err("NullWriter".into())
     }
 
@@ -314,10 +134,39 @@ impl VideoWriter for NullWriter {
     }
 }
 
+struct NullDetector;
+
+impl FaceDetector for NullDetector {
+    fn detect(
+        &mut self,
+        _frame: &crate::shared::frame::Frame,
+    ) -> Result<Vec<crate::shared::region::Region>, Box<dyn std::error::Error>> {
+        Err("NullDetector".into())
+    }
+}
+
+struct NullBlurrer;
+
+impl FrameBlurrer for NullBlurrer {
+    fn blur(
+        &self,
+        _frame: &mut crate::shared::frame::Frame,
+        _regions: &[crate::shared::region::Region],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        Err("NullBlurrer".into())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::detection::domain::region_merger::RegionMerger;
+    use crate::pipeline::infrastructure::threaded_pipeline_executor::ThreadedPipelineExecutor;
+    use crate::shared::frame::Frame;
+    use crate::shared::region::Region;
+    use crate::shared::video_metadata::VideoMetadata;
     use std::collections::HashMap;
+    use std::sync::atomic::Ordering;
     use std::sync::Mutex;
 
     // --- Stubs ---
@@ -481,6 +330,10 @@ mod tests {
         }
     }
 
+    fn default_executor() -> Box<dyn PipelineExecutor> {
+        Box::new(ThreadedPipelineExecutor::new())
+    }
+
     // --- Tests ---
 
     #[test]
@@ -496,6 +349,7 @@ mod tests {
             }),
             Box::new(PassthroughBlurrer::new()),
             RegionMerger::new(),
+            default_executor(),
             Some(0),
             None,
             None,
@@ -521,6 +375,7 @@ mod tests {
             }),
             Box::new(PassthroughBlurrer::new()),
             RegionMerger::new(),
+            default_executor(),
             Some(3),
             None,
             None,
@@ -551,6 +406,7 @@ mod tests {
             }),
             Box::new(PassthroughBlurrer::new()),
             RegionMerger::new(),
+            default_executor(),
             Some(2),
             None,
             None,
@@ -576,6 +432,7 @@ mod tests {
             }),
             Box::new(PassthroughBlurrer::new()),
             RegionMerger::new(),
+            default_executor(),
             Some(5),
             None,
             None,
@@ -603,6 +460,7 @@ mod tests {
             }),
             Box::new(PassthroughBlurrer::new()),
             RegionMerger::new(),
+            default_executor(),
             Some(0),
             None,
             None,
@@ -634,6 +492,7 @@ mod tests {
             }),
             Box::new(blurrer),
             RegionMerger::new(),
+            default_executor(),
             Some(3),
             None,
             None,
@@ -674,6 +533,7 @@ mod tests {
             }),
             Box::new(blurrer),
             RegionMerger::new(),
+            default_executor(),
             Some(0), // no lookahead
             None,
             None,
@@ -710,6 +570,7 @@ mod tests {
             }),
             Box::new(blurrer),
             RegionMerger::new(),
+            default_executor(),
             Some(0),
             Some(HashSet::from([1])), // only blur track 1
             None,
@@ -744,6 +605,7 @@ mod tests {
             }),
             Box::new(blurrer),
             RegionMerger::new(),
+            default_executor(),
             Some(0),
             None,
             Some(HashSet::from([2])), // exclude track 2
@@ -769,6 +631,7 @@ mod tests {
             }),
             Box::new(PassthroughBlurrer::new()),
             RegionMerger::new(),
+            default_executor(),
             Some(0),
             None,
             None,
@@ -796,6 +659,7 @@ mod tests {
             }),
             Box::new(PassthroughBlurrer::new()),
             RegionMerger::new(),
+            default_executor(),
             Some(0),
             None,
             None,
@@ -833,6 +697,7 @@ mod tests {
             }),
             Box::new(PassthroughBlurrer::new()),
             RegionMerger::new(),
+            default_executor(),
             Some(0),
             None,
             None,
@@ -867,6 +732,7 @@ mod tests {
             Box::new(FailingDetector),
             Box::new(PassthroughBlurrer::new()),
             RegionMerger::new(),
+            default_executor(),
             Some(0),
             None,
             None,

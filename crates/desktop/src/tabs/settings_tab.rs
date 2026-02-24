@@ -5,7 +5,7 @@ use crate::app::{scaled, Message};
 use crate::settings::{Appearance, BlurShape, Settings};
 use crate::theme::{muted_color, section_color};
 
-pub fn view<'a>(settings: &Settings) -> Element<'a, Message> {
+pub fn view<'a>(settings: &Settings, gpu_available: bool) -> Element<'a, Message> {
     let fs = settings.font_scale;
     let theme = crate::theme::resolve_theme(settings.appearance, settings.high_contrast);
     let muted = muted_color(&theme);
@@ -51,6 +51,14 @@ pub fn view<'a>(settings: &Settings) -> Element<'a, Message> {
         text("How heavily faces are blurred.")
             .size(scaled(12.0, fs))
             .color(muted),
+        Space::new().height(8),
+        text(if gpu_available {
+            "Blur backend: GPU accelerated"
+        } else {
+            "Blur backend: CPU"
+        })
+        .size(scaled(11.0, fs))
+        .color(muted),
     ]
     .spacing(0);
 

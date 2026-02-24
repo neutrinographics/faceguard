@@ -13,7 +13,6 @@ const CARD_SIZE: f32 = 96.0;
 const CARD_SPACING: f32 = 10.0;
 
 /// State for the faces well.
-#[derive(Debug, Clone)]
 pub struct FacesWellState {
     /// track_id → path to thumbnail JPEG
     pub crops: HashMap<u32, PathBuf>,
@@ -23,8 +22,8 @@ pub struct FacesWellState {
     pub group_faces: bool,
     /// Currently selected face IDs
     pub selected: HashSet<u32>,
-    /// Path to the temp directory holding crop images (leaked from preview worker).
-    pub temp_dir: Option<PathBuf>,
+    /// Temp directory holding crop images (cleaned up via RAII on drop).
+    temp_dir: Option<tempfile::TempDir>,
 }
 
 impl FacesWellState {
@@ -43,9 +42,8 @@ impl FacesWellState {
         &mut self,
         crops: HashMap<u32, PathBuf>,
         groups: Vec<Vec<u32>>,
-        temp_dir: PathBuf,
+        temp_dir: tempfile::TempDir,
     ) {
-        self.cleanup_temp_dir();
         self.selected = crops.keys().copied().collect();
         self.crops = crops;
         self.groups = groups;
@@ -54,18 +52,10 @@ impl FacesWellState {
 
     /// Clear all state and clean up temp directory.
     pub fn clear(&mut self) {
-        self.cleanup_temp_dir();
         self.crops.clear();
         self.groups.clear();
         self.selected.clear();
-    }
-
-    /// Remove the leaked temp directory if it exists.
-    fn cleanup_temp_dir(&mut self) {
-        if let Some(ref dir) = self.temp_dir {
-            let _ = std::fs::remove_dir_all(dir);
-            self.temp_dir = None;
-        }
+        self.temp_dir = None;
     }
 
     /// Toggle selection of a single face.

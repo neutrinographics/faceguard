@@ -2,26 +2,30 @@
 ///
 /// `kernel_size` must be odd and >= 1. Sigma is derived as `kernel_size / 6.0`
 /// (matching OpenCV's sigma=0 convention).
-pub fn gaussian_kernel_1d(kernel_size: usize) -> Vec<f64> {
+pub fn gaussian_kernel_1d(kernel_size: usize) -> Vec<f32> {
     debug_assert!(kernel_size >= 1 && kernel_size % 2 == 1);
     let sigma = kernel_size as f64 / 6.0;
     let half = (kernel_size / 2) as f64;
-    let mut kernel: Vec<f64> = (0..kernel_size)
+    // Compute in f64 for precision, then convert to f32
+    let mut kernel_f64: Vec<f64> = (0..kernel_size)
         .map(|i| {
             let x = i as f64 - half;
             (-x * x / (2.0 * sigma * sigma)).exp()
         })
         .collect();
-    let sum: f64 = kernel.iter().sum();
-    for v in &mut kernel {
+    let sum: f64 = kernel_f64.iter().sum();
+    for v in &mut kernel_f64 {
         *v /= sum;
     }
-    kernel
+    kernel_f64.iter().map(|&v| v as f32).collect()
 }
 
 /// Apply a separable Gaussian blur to an RGB image stored as `[height][width][3]`.
 ///
 /// The image is modified in-place. `kernel_size` must be odd.
+/// Convenience wrapper that allocates its own temp buffer; prefer
+/// [`separable_gaussian_blur_with_temp`] in hot paths.
+#[cfg(test)]
 pub fn separable_gaussian_blur(
     data: &mut [u8],
     width: usize,
@@ -29,25 +33,59 @@ pub fn separable_gaussian_blur(
     channels: usize,
     kernel_size: usize,
 ) {
+    let mut temp = Vec::new();
+    separable_gaussian_blur_with_temp(data, width, height, channels, kernel_size, &mut temp);
+}
+
+/// Apply a separable Gaussian blur, reusing `temp` as the intermediate buffer.
+///
+/// The caller should keep `temp` alive across calls to avoid reallocations.
+pub fn separable_gaussian_blur_with_temp(
+    data: &mut [u8],
+    width: usize,
+    height: usize,
+    channels: usize,
+    kernel_size: usize,
+    temp: &mut Vec<f32>,
+) {
     if kernel_size <= 1 || width == 0 || height == 0 {
         return;
     }
     let kernel = gaussian_kernel_1d(kernel_size);
+    separable_gaussian_blur_with_kernel(data, width, height, channels, &kernel, temp);
+}
+
+/// Apply a separable Gaussian blur using a pre-computed kernel, reusing `temp`.
+///
+/// Use this in hot paths where the kernel is computed once and reused across frames.
+pub fn separable_gaussian_blur_with_kernel(
+    data: &mut [u8],
+    width: usize,
+    height: usize,
+    channels: usize,
+    kernel: &[f32],
+    temp: &mut Vec<f32>,
+) {
+    let kernel_size = kernel.len();
+    if kernel_size <= 1 || width == 0 || height == 0 {
+        return;
+    }
     let half = kernel_size / 2;
 
-    // Temporary buffer for intermediate results
-    let mut temp = vec![0.0f64; width * height * channels];
+    // Reuse temp buffer (only reallocates if capacity is insufficient)
+    let needed = width * height * channels;
+    temp.resize(needed, 0.0);
 
     // Horizontal pass: data → temp
     for y in 0..height {
         for x in 0..width {
             for c in 0..channels {
-                let mut sum = 0.0;
+                let mut sum = 0.0f32;
                 for (k, &w) in kernel.iter().enumerate() {
                     let sx = (x as isize + k as isize - half as isize)
                         .max(0)
                         .min((width - 1) as isize) as usize;
-                    sum += data[(y * width + sx) * channels + c] as f64 * w;
+                    sum += data[(y * width + sx) * channels + c] as f32 * w;
                 }
                 temp[(y * width + x) * channels + c] = sum;
             }
@@ -58,7 +96,7 @@ pub fn separable_gaussian_blur(
     for y in 0..height {
         for x in 0..width {
             for c in 0..channels {
-                let mut sum = 0.0;
+                let mut sum = 0.0f32;
                 for (k, &w) in kernel.iter().enumerate() {
                     let sy = (y as isize + k as isize - half as isize)
                         .max(0)
@@ -119,22 +157,22 @@ pub fn upscale(
 
     for y in 0..target_h {
         for x in 0..target_w {
-            let src_x = x as f64 * (width as f64 - 1.0) / (target_w as f64 - 1.0).max(1.0);
-            let src_y = y as f64 * (height as f64 - 1.0) / (target_h as f64 - 1.0).max(1.0);
+            let src_x = x as f32 * (width as f32 - 1.0) / (target_w as f32 - 1.0).max(1.0);
+            let src_y = y as f32 * (height as f32 - 1.0) / (target_h as f32 - 1.0).max(1.0);
 
             let x0 = (src_x.floor() as usize).min(width - 1);
             let x1 = (x0 + 1).min(width - 1);
             let y0 = (src_y.floor() as usize).min(height - 1);
             let y1 = (y0 + 1).min(height - 1);
 
-            let fx = src_x - x0 as f64;
-            let fy = src_y - y0 as f64;
+            let fx = src_x - x0 as f32;
+            let fy = src_y - y0 as f32;
 
             for c in 0..channels {
-                let v00 = data[(y0 * width + x0) * channels + c] as f64;
-                let v10 = data[(y0 * width + x1) * channels + c] as f64;
-                let v01 = data[(y1 * width + x0) * channels + c] as f64;
-                let v11 = data[(y1 * width + x1) * channels + c] as f64;
+                let v00 = data[(y0 * width + x0) * channels + c] as f32;
+                let v10 = data[(y0 * width + x1) * channels + c] as f32;
+                let v01 = data[(y1 * width + x0) * channels + c] as f32;
+                let v11 = data[(y1 * width + x1) * channels + c] as f32;
 
                 let val = v00 * (1.0 - fx) * (1.0 - fy)
                     + v10 * fx * (1.0 - fy)
@@ -155,15 +193,15 @@ mod tests {
     #[test]
     fn test_kernel_sums_to_one() {
         let k = gaussian_kernel_1d(7);
-        let sum: f64 = k.iter().sum();
-        assert!((sum - 1.0).abs() < 1e-10);
+        let sum: f32 = k.iter().sum();
+        assert!((sum - 1.0).abs() < 1e-6);
     }
 
     #[test]
     fn test_kernel_is_symmetric() {
         let k = gaussian_kernel_1d(7);
         for i in 0..k.len() / 2 {
-            assert!((k[i] - k[k.len() - 1 - i]).abs() < 1e-10);
+            assert!((k[i] - k[k.len() - 1 - i]).abs() < 1e-6);
         }
     }
 

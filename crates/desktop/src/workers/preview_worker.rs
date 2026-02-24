@@ -11,21 +11,18 @@ use video_blur_core::detection::domain::face_region_builder::{FaceRegionBuilder,
 use video_blur_core::detection::domain::region_smoother::{RegionSmoother, DEFAULT_ALPHA};
 use video_blur_core::detection::infrastructure::bytetrack_tracker::ByteTracker;
 use video_blur_core::detection::infrastructure::histogram_face_grouper::HistogramFaceGrouper;
-use video_blur_core::detection::infrastructure::model_resolver;
 use video_blur_core::detection::infrastructure::onnx_yolo_detector::OnnxYoloDetector;
 use video_blur_core::detection::infrastructure::skip_frame_detector::SkipFrameDetector;
 use video_blur_core::pipeline::preview_faces_use_case::PreviewFacesUseCase;
-use video_blur_core::shared::constants::{
-    EMBEDDING_MODEL_NAME, EMBEDDING_MODEL_URL, IMAGE_EXTENSIONS, TRACKER_MAX_LOST,
-    YOLO_MODEL_NAME, YOLO_MODEL_URL,
-};
+use video_blur_core::shared::constants::{IMAGE_EXTENSIONS, TRACKER_MAX_LOST};
 use video_blur_core::shared::region::Region;
 use video_blur_core::video::infrastructure::ffmpeg_reader::FfmpegReader;
 use video_blur_core::video::infrastructure::image_file_reader::ImageFileReader;
 use video_blur_core::video::infrastructure::image_file_writer::ImageFileWriter;
 
+use super::model_cache::ModelCache;
+
 /// Messages sent from the preview worker thread to the UI.
-#[derive(Debug, Clone)]
 pub enum PreviewMessage {
     DownloadProgress(u64, u64),
     ScanProgress(usize, usize),
@@ -35,7 +32,6 @@ pub enum PreviewMessage {
 }
 
 /// Result of a preview scan.
-#[derive(Debug, Clone)]
 pub struct PreviewResult {
     /// track_id → path to saved thumbnail JPEG
     pub crops: HashMap<u32, PathBuf>,
@@ -43,16 +39,15 @@ pub struct PreviewResult {
     pub groups: Vec<Vec<u32>>,
     /// Cached detection results: frame_index → regions
     pub detection_cache: HashMap<usize, Vec<Region>>,
-    /// Temporary directory containing crop files (keep alive)
-    #[allow(dead_code)]
-    pub temp_dir: PathBuf,
+    /// Temporary directory containing crop files (dropped = cleaned up via RAII).
+    pub temp_dir: tempfile::TempDir,
 }
 
 /// Parameters for a preview job.
-#[derive(Clone)]
 pub struct PreviewParams {
     pub input_path: PathBuf,
     pub confidence: u32,
+    pub model_cache: Arc<ModelCache>,
 }
 
 /// Spawn a background preview worker. Returns the channel receiver and cancellation token.
@@ -82,41 +77,45 @@ fn run_preview(
     let input = &params.input_path;
     let confidence = params.confidence as f64 / 100.0;
 
-    // Resolve detector model
+    // Wait for detector model (pre-loaded at startup or download in progress)
     let tx_dl = tx.clone();
-    let model_path = model_resolver::resolve(
-        YOLO_MODEL_NAME,
-        YOLO_MODEL_URL,
-        None,
-        Some(Box::new(move |downloaded, total| {
-            let _ = tx_dl.send(PreviewMessage::DownloadProgress(downloaded, total));
-        })),
-    )?;
+    let model_path = params
+        .model_cache
+        .wait_for_yolo(
+            &|dl, total| {
+                let _ = tx_dl.send(PreviewMessage::DownloadProgress(dl, total));
+            },
+            cancelled,
+        )
+        .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
 
     if cancelled.load(Ordering::Relaxed) {
         return Err("Cancelled".into());
     }
 
-    // Resolve embedding model for grouping (try to download, fall back to histogram)
+    // Wait for embedding model for grouping (fall back to histogram on failure)
     let tx_dl2 = tx.clone();
-    let embedding_path = model_resolver::resolve(
-        EMBEDDING_MODEL_NAME,
-        EMBEDDING_MODEL_URL,
-        None,
-        Some(Box::new(move |downloaded, total| {
-            let _ = tx_dl2.send(PreviewMessage::DownloadProgress(downloaded, total));
-        })),
+    let embedding_path = params.model_cache.wait_for_embedding(
+        &|dl, total| {
+            let _ = tx_dl2.send(PreviewMessage::DownloadProgress(dl, total));
+        },
+        cancelled,
     );
 
     if cancelled.load(Ordering::Relaxed) {
         return Err("Cancelled".into());
     }
 
-    // Build detector
+    // Build detector (use pre-built session if available, otherwise build from path)
     let smoother = RegionSmoother::new(DEFAULT_ALPHA);
     let region_builder = FaceRegionBuilder::new(DEFAULT_PADDING, Some(Box::new(smoother)));
     let tracker = ByteTracker::new(TRACKER_MAX_LOST);
-    let det = OnnxYoloDetector::new(&model_path, region_builder, tracker, confidence)?;
+    let det = match params.model_cache.get_yolo_session() {
+        Some((session, input_size)) => OnnxYoloDetector::from_shared_session(
+            session, input_size, region_builder, tracker, confidence,
+        ),
+        None => OnnxYoloDetector::new(&model_path, region_builder, tracker, confidence)?,
+    };
     let detector: Box<dyn video_blur_core::detection::domain::face_detector::FaceDetector> =
         Box::new(SkipFrameDetector::new(Box::new(det), 2)?);
 
@@ -160,14 +159,11 @@ fn run_preview(
     let embedding_result = embedding_path.map_err(|e| -> Box<dyn std::error::Error> { e.into() });
     let groups = group_faces(&crops, &embedding_result)?;
 
-    // Keep temp_dir alive by leaking it (we store the path, cleanup happens on new input)
-    std::mem::forget(temp_dir);
-
     let _ = tx.send(PreviewMessage::Complete(PreviewResult {
         crops,
         groups,
         detection_cache,
-        temp_dir: temp_path,
+        temp_dir,
     }));
 
     Ok(())

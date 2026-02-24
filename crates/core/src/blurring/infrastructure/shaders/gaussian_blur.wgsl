@@ -3,6 +3,8 @@
 // Pass 0 = horizontal blur, Pass 1 = vertical blur + ellipse composite.
 // The original (unblurred) image is kept in `original` for the final
 // masked composite step.
+//
+// Kernel weights are pre-computed on CPU and passed via `kernel_weights`.
 
 struct Params {
     width: u32,
@@ -24,6 +26,7 @@ struct Params {
 @group(0) @binding(1) var<storage, read> input: array<u32>;
 @group(0) @binding(2) var<storage, read_write> output: array<u32>;
 @group(0) @binding(3) var<storage, read> original: array<u32>;
+@group(0) @binding(4) var<storage, read> kernel_weights: array<f32>;
 
 fn unpack_rgba(packed: u32) -> vec4<f32> {
     return vec4<f32>(
@@ -56,14 +59,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var weight_sum = 0.0;
 
     let radius = i32(params.kernel_radius);
-    let sigma2 = 2.0 * params.sigma * params.sigma;
 
     if params.direction == 0u {
         // Horizontal direction
         for (var k = -radius; k <= radius; k = k + 1) {
             let sx = clamp(i32(x) + k, 0, i32(params.width) - 1);
             let sample_idx = y * params.width + u32(sx);
-            let w = exp(-f32(k * k) / sigma2);
+            let w = kernel_weights[k + radius];
             color += unpack_rgba(input[sample_idx]) * w;
             weight_sum += w;
         }
@@ -72,7 +74,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         for (var k = -radius; k <= radius; k = k + 1) {
             let sy = clamp(i32(y) + k, 0, i32(params.height) - 1);
             let sample_idx = u32(sy) * params.width + x;
-            let w = exp(-f32(k * k) / sigma2);
+            let w = kernel_weights[k + radius];
             color += unpack_rgba(input[sample_idx]) * w;
             weight_sum += w;
         }

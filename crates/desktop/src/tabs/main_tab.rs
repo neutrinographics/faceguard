@@ -160,7 +160,7 @@ pub fn view<'a>(
         ProcessingState::Preparing => {
             col = col
                 .push(
-                    text("Loading model...")
+                    text("Preparing...")
                         .size(scaled(14.0, fs))
                         .color(muted),
                 )

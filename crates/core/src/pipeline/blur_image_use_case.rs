@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::blurring::domain::frame_blurrer::FrameBlurrer;
 use crate::detection::domain::face_detector::FaceDetector;
-use crate::pipeline::region_filter::filter_regions;
+use crate::shared::region::Region;
 use crate::video::domain::image_writer::ImageWriter;
 use crate::video::domain::video_reader::VideoReader;
 
@@ -48,7 +48,7 @@ impl BlurImageUseCase {
         self.reader.close();
 
         let regions = self.detector.detect(&frame)?;
-        let filtered = filter_regions(&regions, self.blur_ids.as_ref(), self.exclude_ids.as_ref());
+        let filtered = Region::filter(&regions, self.blur_ids.as_ref(), self.exclude_ids.as_ref());
 
         self.blurrer.blur(&mut frame, &filtered)?;
         self.image_writer.write(output_path, &frame, None)?;

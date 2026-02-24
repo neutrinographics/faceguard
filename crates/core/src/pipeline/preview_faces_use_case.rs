@@ -56,11 +56,17 @@ impl PreviewFacesUseCase {
 
         let total_frames = metadata.total_frames;
 
-        // Collect frames to avoid borrow conflict between reader and detector
-        let all_frames: Vec<Frame> = self.reader.frames().collect::<Result<Vec<_>, _>>()?;
+        // Decode and detect one frame at a time so progress is reported
+        // immediately rather than after buffering the entire video.
+        // We split reader/detector out of self to satisfy the borrow checker.
+        let reader = &mut self.reader;
+        let detector = &mut self.detector;
+        let on_progress = &self.on_progress;
 
-        for frame in &all_frames {
-            let regions = self.detector.detect(frame)?;
+        for result in reader.frames() {
+            let frame = result?;
+
+            let regions = detector.detect(&frame)?;
 
             detection_cache.insert(frame.index(), regions.clone());
 
@@ -70,12 +76,16 @@ impl PreviewFacesUseCase {
                 };
                 let area = r.width as u32 * r.height as u32;
                 if !best.contains_key(&track_id) || area > best[&track_id].0 {
-                    let crop = square_crop(frame, r);
+                    let crop = square_crop(&frame, r);
                     best.insert(track_id, (area, crop));
                 }
             }
 
-            self.report_progress(frame.index() + 1, total_frames)?;
+            if let Some(ref callback) = on_progress {
+                if !callback(frame.index() + 1, total_frames) {
+                    return Err("Cancelled".into());
+                }
+            }
         }
 
         self.reader.close();
@@ -95,18 +105,6 @@ impl PreviewFacesUseCase {
         Ok((result, detection_cache))
     }
 
-    fn report_progress(
-        &self,
-        current: usize,
-        total: usize,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(ref callback) = self.on_progress {
-            if !callback(current, total) {
-                return Err("Cancelled".into());
-            }
-        }
-        Ok(())
-    }
 }
 
 /// Extracts a square crop centered on the region, clamped to frame bounds.
