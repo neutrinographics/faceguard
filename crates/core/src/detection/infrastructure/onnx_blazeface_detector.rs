@@ -37,7 +37,13 @@ impl OnnxBlazefaceDetector {
         confidence: f64,
         fps: f64,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let session = ort::session::Session::builder()?.commit_from_file(model_path)?;
+        let session = ort::session::Session::builder()?
+            .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)?
+            .with_inter_threads(1)?
+            .with_execution_providers([
+                ort::execution_providers::CoreMLExecutionProvider::default().build(),
+            ])?
+            .commit_from_file(model_path)?;
         let anchors = generate_anchors();
         Ok(Self {
             session,

@@ -80,12 +80,11 @@ fn interpolate(region: &Region, idx: usize, total: usize, frame_w: u32, frame_h:
     // Determine which edge is nearest and its threshold.
     // Use a small tolerance for float comparison (matching Python's integer arithmetic).
     let eps = 1e-9;
-    let threshold =
-        if (min_dist - d_left).abs() < eps || (min_dist - d_right).abs() < eps {
-            frame_w as f64 * EDGE_FRACTION
-        } else {
-            frame_h as f64 * EDGE_FRACTION
-        };
+    let threshold = if (min_dist - d_left).abs() < eps || (min_dist - d_right).abs() < eps {
+        frame_w as f64 * EDGE_FRACTION
+    } else {
+        frame_h as f64 * EDGE_FRACTION
+    };
 
     if min_dist > threshold {
         return region.clone();

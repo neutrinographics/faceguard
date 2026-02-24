@@ -47,7 +47,13 @@ impl OnnxYoloDetector {
         tracker: ByteTracker,
         confidence: f64,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let session = ort::session::Session::builder()?.commit_from_file(model_path)?;
+        let session = ort::session::Session::builder()?
+            .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)?
+            .with_inter_threads(1)?
+            .with_execution_providers([
+                ort::execution_providers::CoreMLExecutionProvider::default().build(),
+            ])?
+            .commit_from_file(model_path)?;
 
         // Try to read input size from model metadata (NCHW: [1, 3, H, W])
         let input_size = session
