@@ -184,10 +184,12 @@ fn create_video_encoder(
         .flags()
         .contains(ffmpeg_next::format::Flags::GLOBAL_HEADER);
 
-    // Prefer H.264 for smaller files; fall back to MPEG4
-    let codec = ffmpeg_next::encoder::find(ffmpeg_next::codec::Id::H264)
+    // Prefer H.264 (libx264) for CRF support; fall back to MPEG4 with qscale
+    let h264 = ffmpeg_next::encoder::find(ffmpeg_next::codec::Id::H264);
+    let codec = h264
         .or_else(|| ffmpeg_next::encoder::find(ffmpeg_next::codec::Id::MPEG4))
         .ok_or("No suitable video encoder found (tried H264, MPEG4)")?;
+    let is_h264 = h264.is_some();
 
     let mut ost = octx.add_stream(Some(codec))?;
 
@@ -206,8 +208,15 @@ fn create_video_encoder(
     }
 
     let mut opts = ffmpeg_next::Dictionary::new();
-    opts.set("preset", "medium");
-    opts.set("crf", &crf.max(1).to_string());
+    if is_h264 {
+        opts.set("preset", "medium");
+        opts.set("crf", &crf.max(1).to_string());
+    } else {
+        // MPEG4 uses global_quality (qscale). Map CRF 1–51 to qscale 1–31.
+        // FF_QP2LAMBDA = 128
+        let qscale = (crf.clamp(1, 51) as f64 * 31.0 / 51.0).round().max(1.0) as i32;
+        encoder_ctx.set_global_quality(qscale * 128);
+    }
     let encoder = encoder_ctx.open_with(opts)?;
     ost.set_parameters(&encoder);
 

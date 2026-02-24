@@ -22,7 +22,9 @@ Automatic face detection and blurring for videos and images. Detects faces using
 - **FFmpeg 7 development libraries** — Required for video I/O
   - macOS: `brew install ffmpeg`
   - Ubuntu/Debian: `apt install libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libavdevice-dev`
-  - Or use the `static-ffmpeg` feature to build FFmpeg from source (slower initial build)
+  - Or use the `static-ffmpeg` feature to build FFmpeg from source (slower initial build). Requires x264 development libraries:
+    - macOS: `brew install x264`
+    - Ubuntu/Debian: `apt install libx264-dev`
 
 ONNX models are downloaded automatically on first run to `~/.cache/video-blur/`.
 

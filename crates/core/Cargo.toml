@@ -21,7 +21,7 @@ crossbeam-channel = { workspace = true }
 ort = { workspace = true }
 
 [features]
-static-ffmpeg = ["ffmpeg-next/build"]
+static-ffmpeg = ["ffmpeg-next/build", "ffmpeg-next/build-lib-x264", "ffmpeg-next/build-license-gpl"]
 
 [dev-dependencies]
 rstest = { workspace = true }
