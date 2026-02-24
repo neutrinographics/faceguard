@@ -106,11 +106,7 @@ impl PreviewFacesUseCase {
     }
 }
 
-fn update_best_crops(
-    best: &mut BestCrops,
-    frame: &Frame,
-    regions: &[Region],
-) {
+fn update_best_crops(best: &mut BestCrops, frame: &Frame, regions: &[Region]) {
     for r in regions {
         let Some(track_id) = r.track_id else {
             continue;

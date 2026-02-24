@@ -4,8 +4,6 @@ use crate::shared::frame::Frame;
 use crate::video::domain::image_writer::ImageWriter;
 
 /// Writes a single frame to an image file using the `image` crate.
-///
-/// Supports optional resizing for thumbnails.
 pub struct ImageFileWriter;
 
 impl ImageFileWriter {
@@ -27,7 +25,6 @@ impl ImageWriter for ImageFileWriter {
         frame: &Frame,
         size: Option<(u32, u32)>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        // Ensure parent directory exists (infrastructure concern)
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }

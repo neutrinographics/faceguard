@@ -16,7 +16,7 @@ pub struct FfmpegWriter {
     scaler: Option<ffmpeg_next::software::scaling::Context>,
     width: u32,
     height: u32,
-    fps: f64,
+    fps: i32,
     frame_count: usize,
     video_stream_index: usize,
     audio_source_stream_idx: Option<usize>,
@@ -38,7 +38,7 @@ impl FfmpegWriter {
             scaler: None,
             width: 0,
             height: 0,
-            fps: 0.0,
+            fps: 30,
             frame_count: 0,
             video_stream_index: 0,
             audio_source_stream_idx: None,
@@ -64,75 +64,23 @@ impl VideoWriter for FfmpegWriter {
 
         self.width = metadata.width;
         self.height = metadata.height;
-        self.fps = metadata.fps;
+        self.fps = sanitize_fps(metadata.fps);
         self.output_path = Some(path.to_path_buf());
         self.source_path = metadata.source_path.clone();
 
         let mut octx = ffmpeg_next::format::output(path)?;
 
-        let global_header = octx
-            .format()
-            .flags()
-            .contains(ffmpeg_next::format::Flags::GLOBAL_HEADER);
+        let encoder = create_video_encoder(&mut octx, metadata, self.fps)?;
 
-        // Prefer H.264 for smaller files; fall back to MPEG4
-        let codec = ffmpeg_next::encoder::find(ffmpeg_next::codec::Id::H264)
-            .or_else(|| ffmpeg_next::encoder::find(ffmpeg_next::codec::Id::MPEG4))
-            .ok_or("No suitable video encoder found (tried H264, MPEG4)")?;
+        self.video_stream_index = 0;
 
-        let mut ost = octx.add_stream(Some(codec))?;
-
-        let mut encoder_ctx = ffmpeg_next::codec::context::Context::new_with_codec(codec)
-            .encoder()
-            .video()?;
-
-        encoder_ctx.set_width(metadata.width);
-        encoder_ctx.set_height(metadata.height);
-        encoder_ctx.set_format(ffmpeg_next::format::Pixel::YUV420P);
-
-        let fps_i = metadata.fps.round() as i32;
-        let fps_i = if fps_i <= 0 { 30 } else { fps_i };
-
-        encoder_ctx.set_time_base(ffmpeg_next::Rational(1, fps_i));
-        encoder_ctx.set_frame_rate(Some(ffmpeg_next::Rational(fps_i, 1)));
-
-        if global_header {
-            encoder_ctx.set_flags(ffmpeg_next::codec::Flags::GLOBAL_HEADER);
-        }
-
-        let encoder = encoder_ctx.open_with(ffmpeg_next::Dictionary::new())?;
-        ost.set_parameters(&encoder);
-
-        self.video_stream_index = 0; // first stream
-
-        // Add audio stream from source if available
-        if let Some(ref source_path) = metadata.source_path {
-            if let Ok(ictx_source) = ffmpeg_next::format::input(source_path) {
-                if let Some(audio_stream) =
-                    ictx_source.streams().best(ffmpeg_next::media::Type::Audio)
-                {
-                    let audio_idx = audio_stream.index();
-                    let audio_tb = audio_stream.time_base();
-                    let audio_params = audio_stream.parameters();
-
-                    let mut audio_ost =
-                        octx.add_stream(ffmpeg_next::encoder::find(ffmpeg_next::codec::Id::None))?;
-                    audio_ost.set_parameters(audio_params);
-                    unsafe {
-                        (*audio_ost.parameters().as_mut_ptr()).codec_tag = 0;
-                    }
-                    let audio_ost_idx = audio_ost.index();
-
-                    self.audio_source_stream_idx = Some(audio_idx);
-                    self.audio_output_stream_idx = Some(audio_ost_idx);
-                    self.audio_source_time_base = Some(audio_tb);
-                }
-            }
-        }
+        let (audio_src, audio_ost, audio_tb) = setup_audio_passthrough(&mut octx, metadata)?;
+        self.audio_source_stream_idx = audio_src;
+        self.audio_output_stream_idx = audio_ost;
+        self.audio_source_time_base = audio_tb;
 
         octx.write_header()?;
 
-        // Set up RGB -> YUV scaler
         let scaler = ffmpeg_next::software::scaling::Context::get(
             ffmpeg_next::format::Pixel::RGB24,
             metadata.width,
@@ -156,46 +104,15 @@ impl VideoWriter for FfmpegWriter {
         let scaler = self.scaler.as_mut().unwrap();
         let octx = self.octx.as_mut().unwrap();
 
-        // Create RGB frame from input data
-        let mut rgb_frame = ffmpeg_next::util::frame::video::Video::new(
-            ffmpeg_next::format::Pixel::RGB24,
-            self.width,
-            self.height,
-        );
+        let rgb_frame = frame_to_rgb_video(frame, self.width, self.height);
 
-        let stride = rgb_frame.stride(0);
-        let data = rgb_frame.data_mut(0);
-        let src = frame.data();
-
-        // Copy pixel data, respecting stride
-        for row in 0..self.height as usize {
-            let src_start = row * self.width as usize * 3;
-            let dst_start = row * stride;
-            data[dst_start..dst_start + self.width as usize * 3]
-                .copy_from_slice(&src[src_start..src_start + self.width as usize * 3]);
-        }
-
-        // Convert RGB -> YUV
         let mut yuv_frame = ffmpeg_next::util::frame::video::Video::empty();
         scaler.run(&rgb_frame, &mut yuv_frame)?;
         yuv_frame.set_pts(Some(self.frame_count as i64));
 
-        let fps_i = if self.fps.round() as i32 <= 0 {
-            30
-        } else {
-            self.fps.round() as i32
-        };
-
         encoder.send_frame(&yuv_frame)?;
 
-        let ost_time_base = octx.stream(self.video_stream_index).unwrap().time_base();
-
-        let mut encoded = ffmpeg_next::Packet::empty();
-        while encoder.receive_packet(&mut encoded).is_ok() {
-            encoded.set_stream(self.video_stream_index);
-            encoded.rescale_ts(ffmpeg_next::Rational(1, fps_i), ost_time_base);
-            encoded.write_interleaved(octx)?;
-        }
+        flush_packets(encoder, octx, self.video_stream_index, self.fps)?;
 
         self.frame_count += 1;
         Ok(())
@@ -203,61 +120,29 @@ impl VideoWriter for FfmpegWriter {
 
     fn close(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(ref mut encoder) = self.encoder {
-            let fps_i = if self.fps.round() as i32 <= 0 {
-                30
-            } else {
-                self.fps.round() as i32
-            };
-
             let octx = self.octx.as_mut().unwrap();
-            let ost_time_base = octx.stream(self.video_stream_index).unwrap().time_base();
 
-            // Flush encoder
             encoder.send_eof()?;
-            let mut encoded = ffmpeg_next::Packet::empty();
-            while encoder.receive_packet(&mut encoded).is_ok() {
-                encoded.set_stream(self.video_stream_index);
-                encoded.rescale_ts(ffmpeg_next::Rational(1, fps_i), ost_time_base);
-                encoded.write_interleaved(octx)?;
-            }
+            flush_packets(encoder, octx, self.video_stream_index, self.fps)?;
 
-            // Copy audio packets from source before writing trailer
-            if let (
-                Some(audio_src_idx),
-                Some(audio_ost_idx),
-                Some(audio_src_tb),
-                Some(ref source_path),
-            ) = (
+            mux_audio_from_source(
+                octx,
                 self.audio_source_stream_idx,
                 self.audio_output_stream_idx,
                 self.audio_source_time_base,
-                &self.source_path,
-            ) {
-                match ffmpeg_next::format::input(source_path) {
-                    Ok(mut ictx) => {
-                        let ost_audio_tb = octx.stream(audio_ost_idx).unwrap().time_base();
-                        for (stream, mut packet) in ictx.packets() {
-                            if stream.index() != audio_src_idx {
-                                continue;
-                            }
-                            packet.rescale_ts(audio_src_tb, ost_audio_tb);
-                            packet.set_position(-1);
-                            packet.set_stream(audio_ost_idx);
-                            if let Err(e) = packet.write_interleaved(octx) {
-                                log::warn!("Failed to write audio packet: {e}");
-                                break;
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        log::warn!("Audio muxing failed: could not reopen source: {e}");
-                    }
-                }
-            }
+                self.source_path.as_ref(),
+            );
 
             octx.write_trailer()?;
         }
 
+        self.reset();
+        Ok(())
+    }
+}
+
+impl FfmpegWriter {
+    fn reset(&mut self) {
         self.octx = None;
         self.encoder = None;
         self.scaler = None;
@@ -266,9 +151,174 @@ impl VideoWriter for FfmpegWriter {
         self.audio_source_stream_idx = None;
         self.audio_output_stream_idx = None;
         self.audio_source_time_base = None;
-
-        Ok(())
     }
+}
+
+/// Clamps fps to a positive integer, defaulting to 30 for invalid values.
+fn sanitize_fps(fps: f64) -> i32 {
+    let rounded = fps.round() as i32;
+    if rounded <= 0 {
+        30
+    } else {
+        rounded
+    }
+}
+
+fn create_video_encoder(
+    octx: &mut ffmpeg_next::format::context::Output,
+    metadata: &VideoMetadata,
+    fps: i32,
+) -> Result<ffmpeg_next::codec::encoder::video::Encoder, Box<dyn std::error::Error>> {
+    let global_header = octx
+        .format()
+        .flags()
+        .contains(ffmpeg_next::format::Flags::GLOBAL_HEADER);
+
+    // Prefer H.264 for smaller files; fall back to MPEG4
+    let codec = ffmpeg_next::encoder::find(ffmpeg_next::codec::Id::H264)
+        .or_else(|| ffmpeg_next::encoder::find(ffmpeg_next::codec::Id::MPEG4))
+        .ok_or("No suitable video encoder found (tried H264, MPEG4)")?;
+
+    let mut ost = octx.add_stream(Some(codec))?;
+
+    let mut encoder_ctx = ffmpeg_next::codec::context::Context::new_with_codec(codec)
+        .encoder()
+        .video()?;
+
+    encoder_ctx.set_width(metadata.width);
+    encoder_ctx.set_height(metadata.height);
+    encoder_ctx.set_format(ffmpeg_next::format::Pixel::YUV420P);
+    encoder_ctx.set_time_base(ffmpeg_next::Rational(1, fps));
+    encoder_ctx.set_frame_rate(Some(ffmpeg_next::Rational(fps, 1)));
+
+    if global_header {
+        encoder_ctx.set_flags(ffmpeg_next::codec::Flags::GLOBAL_HEADER);
+    }
+
+    let encoder = encoder_ctx.open_with(ffmpeg_next::Dictionary::new())?;
+    ost.set_parameters(&encoder);
+
+    Ok(encoder)
+}
+
+type AudioPassthroughInfo = (Option<usize>, Option<usize>, Option<ffmpeg_next::Rational>);
+
+/// Adds an audio passthrough stream if the source video has audio.
+/// Returns (source_stream_idx, output_stream_idx, source_time_base).
+fn setup_audio_passthrough(
+    octx: &mut ffmpeg_next::format::context::Output,
+    metadata: &VideoMetadata,
+) -> Result<AudioPassthroughInfo, Box<dyn std::error::Error>> {
+    let Some(ref source_path) = metadata.source_path else {
+        return Ok((None, None, None));
+    };
+
+    let Ok(ictx_source) = ffmpeg_next::format::input(source_path) else {
+        return Ok((None, None, None));
+    };
+
+    let Some(audio_stream) = ictx_source.streams().best(ffmpeg_next::media::Type::Audio) else {
+        return Ok((None, None, None));
+    };
+
+    let audio_idx = audio_stream.index();
+    let audio_tb = audio_stream.time_base();
+    let audio_params = audio_stream.parameters();
+
+    let mut audio_ost =
+        octx.add_stream(ffmpeg_next::encoder::find(ffmpeg_next::codec::Id::None))?;
+    audio_ost.set_parameters(audio_params);
+    unsafe {
+        (*audio_ost.parameters().as_mut_ptr()).codec_tag = 0;
+    }
+    let audio_ost_idx = audio_ost.index();
+
+    Ok((Some(audio_idx), Some(audio_ost_idx), Some(audio_tb)))
+}
+
+/// Drains all pending encoded packets from the encoder into the output.
+fn flush_packets(
+    encoder: &mut ffmpeg_next::codec::encoder::video::Encoder,
+    octx: &mut ffmpeg_next::format::context::Output,
+    stream_index: usize,
+    fps: i32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let ost_time_base = octx.stream(stream_index).unwrap().time_base();
+
+    let mut encoded = ffmpeg_next::Packet::empty();
+    while encoder.receive_packet(&mut encoded).is_ok() {
+        encoded.set_stream(stream_index);
+        encoded.rescale_ts(ffmpeg_next::Rational(1, fps), ost_time_base);
+        encoded.write_interleaved(octx)?;
+    }
+    Ok(())
+}
+
+/// Copies audio packets from the source file into the output container.
+fn mux_audio_from_source(
+    octx: &mut ffmpeg_next::format::context::Output,
+    audio_source_stream_idx: Option<usize>,
+    audio_output_stream_idx: Option<usize>,
+    audio_source_time_base: Option<ffmpeg_next::Rational>,
+    source_path: Option<&PathBuf>,
+) {
+    let (Some(audio_src_idx), Some(audio_ost_idx), Some(audio_src_tb), Some(source_path)) = (
+        audio_source_stream_idx,
+        audio_output_stream_idx,
+        audio_source_time_base,
+        source_path,
+    ) else {
+        return;
+    };
+
+    let mut ictx = match ffmpeg_next::format::input(source_path) {
+        Ok(ctx) => ctx,
+        Err(e) => {
+            log::warn!("Audio muxing failed: could not reopen source: {e}");
+            return;
+        }
+    };
+
+    let ost_audio_tb = octx.stream(audio_ost_idx).unwrap().time_base();
+    for (stream, mut packet) in ictx.packets() {
+        if stream.index() != audio_src_idx {
+            continue;
+        }
+        packet.rescale_ts(audio_src_tb, ost_audio_tb);
+        packet.set_position(-1);
+        packet.set_stream(audio_ost_idx);
+        if let Err(e) = packet.write_interleaved(octx) {
+            log::warn!("Failed to write audio packet: {e}");
+            break;
+        }
+    }
+}
+
+/// Converts a [`Frame`] into an ffmpeg RGB24 video frame, respecting stride.
+fn frame_to_rgb_video(
+    frame: &Frame,
+    width: u32,
+    height: u32,
+) -> ffmpeg_next::util::frame::video::Video {
+    let mut rgb_frame = ffmpeg_next::util::frame::video::Video::new(
+        ffmpeg_next::format::Pixel::RGB24,
+        width,
+        height,
+    );
+
+    let stride = rgb_frame.stride(0);
+    let dst = rgb_frame.data_mut(0);
+    let src = frame.data();
+    let row_bytes = width as usize * 3;
+
+    for row in 0..height as usize {
+        let src_start = row * row_bytes;
+        let dst_start = row * stride;
+        dst[dst_start..dst_start + row_bytes]
+            .copy_from_slice(&src[src_start..src_start + row_bytes]);
+    }
+
+    rgb_frame
 }
 
 #[cfg(test)]
@@ -320,7 +370,6 @@ mod tests {
         writer.write(&solid_frame(0, 160, 120, 128)).unwrap();
         writer.close().unwrap();
 
-        // Read back and verify
         ffmpeg_next::init().unwrap();
         let ictx = ffmpeg_next::format::input(&path).unwrap();
         let stream = ictx
@@ -351,7 +400,6 @@ mod tests {
         writer.open(&path, &meta).unwrap();
         writer.write(&solid_frame(0, 160, 120, 128)).unwrap();
         writer.close().unwrap();
-        // Second close should not panic
         let _ = writer.close();
     }
 
@@ -378,7 +426,6 @@ mod tests {
         let frames: Vec<_> = reader.frames().map(|f| f.unwrap()).collect();
         assert_eq!(frames.len(), 3);
 
-        // Codec is lossy, but the overall brightness should be close
         let first = &frames[0];
         let avg: f64 =
             first.data().iter().map(|&b| b as f64).sum::<f64>() / first.data().len() as f64;

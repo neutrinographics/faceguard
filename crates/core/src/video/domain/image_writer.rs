@@ -2,9 +2,8 @@ use std::path::Path;
 
 use crate::shared::frame::Frame;
 
-/// Writes a single frame to an image file.
+/// Writes a single frame to an image file, with optional resizing for thumbnails.
 pub trait ImageWriter: Send {
-    /// Writes a frame to the given path, optionally resizing to the given dimensions.
     fn write(
         &self,
         path: &Path,

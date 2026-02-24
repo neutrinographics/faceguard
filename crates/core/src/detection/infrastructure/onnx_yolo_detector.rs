@@ -111,7 +111,11 @@ impl FaceDetector for OnnxYoloDetector {
         let fh = frame.height();
 
         let (scale, pad_x, pad_y) = letterbox_into(frame, self.input_size, &mut self.letterbox_buf);
-        let lb = LetterboxParams { scale, pad_x, pad_y };
+        let lb = LetterboxParams {
+            scale,
+            pad_x,
+            pad_y,
+        };
         let filtered = self.run_inference_and_nms(&lb)?;
         let tracks = self.track(&filtered);
         Ok(self.build_regions(&tracks, &filtered, fw, fh))
@@ -252,7 +256,14 @@ fn parse_detections(
 
         let keypoints = parse_keypoints(&feat, i, num_feats, lb);
 
-        dets.push(RawDetection { x1, y1, x2, y2, confidence: conf, keypoints });
+        dets.push(RawDetection {
+            x1,
+            y1,
+            x2,
+            y2,
+            confidence: conf,
+            keypoints,
+        });
     }
     dets
 }
@@ -414,8 +425,22 @@ mod tests {
     #[test]
     fn test_nms_suppresses_overlapping() {
         let mut dets = vec![
-            RawDetection { x1: 0.0, y1: 0.0, x2: 100.0, y2: 100.0, confidence: 0.9, keypoints: None },
-            RawDetection { x1: 5.0, y1: 5.0, x2: 105.0, y2: 105.0, confidence: 0.8, keypoints: None },
+            RawDetection {
+                x1: 0.0,
+                y1: 0.0,
+                x2: 100.0,
+                y2: 100.0,
+                confidence: 0.9,
+                keypoints: None,
+            },
+            RawDetection {
+                x1: 5.0,
+                y1: 5.0,
+                x2: 105.0,
+                y2: 105.0,
+                confidence: 0.8,
+                keypoints: None,
+            },
         ];
         let kept = nms(&mut dets, 0.3);
         assert_eq!(kept.len(), 1);
@@ -425,8 +450,22 @@ mod tests {
     #[test]
     fn test_nms_keeps_non_overlapping() {
         let mut dets = vec![
-            RawDetection { x1: 0.0, y1: 0.0, x2: 50.0, y2: 50.0, confidence: 0.9, keypoints: None },
-            RawDetection { x1: 200.0, y1: 200.0, x2: 250.0, y2: 250.0, confidence: 0.8, keypoints: None },
+            RawDetection {
+                x1: 0.0,
+                y1: 0.0,
+                x2: 50.0,
+                y2: 50.0,
+                confidence: 0.9,
+                keypoints: None,
+            },
+            RawDetection {
+                x1: 200.0,
+                y1: 200.0,
+                x2: 250.0,
+                y2: 250.0,
+                confidence: 0.8,
+                keypoints: None,
+            },
         ];
         let kept = nms(&mut dets, 0.3);
         assert_eq!(kept.len(), 2);
@@ -441,8 +480,22 @@ mod tests {
     #[test]
     fn test_nms_confidence_ordering() {
         let mut dets = vec![
-            RawDetection { x1: 0.0, y1: 0.0, x2: 100.0, y2: 100.0, confidence: 0.5, keypoints: None },
-            RawDetection { x1: 2.0, y1: 2.0, x2: 102.0, y2: 102.0, confidence: 0.9, keypoints: None },
+            RawDetection {
+                x1: 0.0,
+                y1: 0.0,
+                x2: 100.0,
+                y2: 100.0,
+                confidence: 0.5,
+                keypoints: None,
+            },
+            RawDetection {
+                x1: 2.0,
+                y1: 2.0,
+                x2: 102.0,
+                y2: 102.0,
+                confidence: 0.9,
+                keypoints: None,
+            },
         ];
         let kept = nms(&mut dets, 0.3);
         assert_eq!(kept.len(), 1);

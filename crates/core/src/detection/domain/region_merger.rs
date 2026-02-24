@@ -99,13 +99,7 @@ fn region_center(region: &Region) -> (f64, f64) {
 /// Compute the (dx, dy) offset to push toward the nearest edge.
 ///
 /// Returns None if the region center isn't within EDGE_FRACTION of any edge.
-fn nearest_edge_offset(
-    cx: f64,
-    cy: f64,
-    frame_w: u32,
-    frame_h: u32,
-    t: f64,
-) -> Option<(f64, f64)> {
+fn nearest_edge_offset(cx: f64, cy: f64, frame_w: u32, frame_h: u32, t: f64) -> Option<(f64, f64)> {
     let eps = 1e-9;
 
     let d_left = cx;

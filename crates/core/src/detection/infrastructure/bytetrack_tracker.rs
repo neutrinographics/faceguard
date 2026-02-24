@@ -278,7 +278,9 @@ mod tests {
     #[test]
     fn test_low_confidence_does_not_start_new_track() {
         let mut tracker = ByteTracker::new(5);
-        assert!(tracker.update(&[det(10.0, 10.0, 60.0, 60.0, 0.3)]).is_empty());
+        assert!(tracker
+            .update(&[det(10.0, 10.0, 60.0, 60.0, 0.3)])
+            .is_empty());
     }
 
     #[test]

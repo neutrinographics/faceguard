@@ -43,8 +43,7 @@ pub fn union(parent: &mut [usize], a: usize, b: usize) {
 /// Takes a union-find `parent` array and an iterator of `(index, id)` pairs.
 /// Returns groups sorted by their smallest ID for deterministic output.
 pub fn collect_groups(parent: &mut [usize], entries: &[(usize, u32)]) -> Vec<Vec<u32>> {
-    let mut groups: std::collections::HashMap<usize, Vec<u32>> =
-        std::collections::HashMap::new();
+    let mut groups: std::collections::HashMap<usize, Vec<u32>> = std::collections::HashMap::new();
     for &(idx, id) in entries {
         let root = find(parent, idx);
         groups.entry(root).or_default().push(id);

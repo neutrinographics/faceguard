@@ -59,8 +59,7 @@ impl PipelineExecutor for ThreadedPipelineExecutor {
 
         writer.open(output_path, metadata)?;
 
-        let (frame_tx, frame_rx) =
-            crossbeam_channel::bounded::<Result<Frame, SendError>>(cap);
+        let (frame_tx, frame_rx) = crossbeam_channel::bounded::<Result<Frame, SendError>>(cap);
         let (detected_tx, detected_rx) =
             crossbeam_channel::bounded::<Result<(Frame, Vec<Region>), SendError>>(cap);
         let (write_tx, write_rx) = crossbeam_channel::bounded::<Frame>(cap);
