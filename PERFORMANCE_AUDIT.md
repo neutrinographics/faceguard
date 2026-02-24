@@ -58,7 +58,7 @@ For transposed output layout, each of 8400 detections allocates a `Vec<f32>` jus
 
 ---
 
-### 7. Gaussian blur uses f64
+### 7. ~~Gaussian blur uses f64~~
 **File**: `crates/core/src/blurring/infrastructure/gaussian.rs:25`
 
 Entire separable Gaussian blur operates on f64. For 8-bit pixel processing, f32 is sufficient and ~2x faster due to cache efficiency and SIMD vectorization.
