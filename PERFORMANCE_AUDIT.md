@@ -104,7 +104,7 @@ After encoding video, the muxer re-opens both source and output to copy audio in
 
 ---
 
-### 12. MPEG4 codec instead of H.264
+### 12. ~~MPEG4 codec instead of H.264~~
 **File**: `crates/core/src/video/infrastructure/ffmpeg_writer.rs:73`
 
 MPEG4 Part 2 produces 30-50% larger files than H.264 at the same quality.

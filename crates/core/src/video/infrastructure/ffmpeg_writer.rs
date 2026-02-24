@@ -75,9 +75,10 @@ impl VideoWriter for FfmpegWriter {
             .flags()
             .contains(ffmpeg_next::format::Flags::GLOBAL_HEADER);
 
-        // Use MPEG4 as a widely compatible encoder
-        let codec = ffmpeg_next::encoder::find(ffmpeg_next::codec::Id::MPEG4)
-            .ok_or("MPEG4 encoder not found")?;
+        // Prefer H.264 for smaller files; fall back to MPEG4
+        let codec = ffmpeg_next::encoder::find(ffmpeg_next::codec::Id::H264)
+            .or_else(|| ffmpeg_next::encoder::find(ffmpeg_next::codec::Id::MPEG4))
+            .ok_or("No suitable video encoder found (tried H264, MPEG4)")?;
 
         let mut ost = octx.add_stream(Some(codec))?;
 
