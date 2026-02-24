@@ -1,6 +1,6 @@
 use iced::color;
 use iced::theme::Palette;
-use iced::Theme;
+use iced::{Color, Theme};
 
 use crate::settings::Appearance;
 
@@ -20,6 +20,12 @@ pub fn resolve_theme(appearance: Appearance, high_contrast: bool) -> Theme {
     };
 
     Theme::custom("Video Blur", palette)
+}
+
+/// Return a muted text color appropriate for the current theme.
+pub fn muted_color(theme: &Theme) -> Color {
+    let p = theme.palette();
+    Color { a: 0.5, ..p.text }
 }
 
 fn dark_palette() -> Palette {

@@ -3,9 +3,12 @@ use iced::Element;
 
 use crate::app::{scaled, Message};
 use crate::settings::{BlurShape, Detector, Settings};
+use crate::theme::muted_color;
 
 pub fn view<'a>(settings: &Settings) -> Element<'a, Message> {
     let fs = settings.font_scale;
+    let theme = crate::theme::resolve_theme(settings.appearance, settings.high_contrast);
+    let muted = muted_color(&theme);
 
     column![
         // Detector
@@ -27,7 +30,8 @@ pub fn view<'a>(settings: &Settings) -> Element<'a, Message> {
             Detector::Yolo => "YOLO is more accurate with tracking.",
             Detector::Mediapipe => "MediaPipe is lighter and faster.",
         })
-        .size(scaled(11.0, fs)),
+        .size(scaled(11.0, fs))
+        .color(muted),
         Space::new().height(16),
         // Blur shape
         row![
@@ -46,7 +50,8 @@ pub fn view<'a>(settings: &Settings) -> Element<'a, Message> {
             BlurShape::Ellipse => "Ellipse follows the natural shape of a face.",
             BlurShape::Rect => "Rectangle covers a wider area.",
         })
-        .size(scaled(11.0, fs)),
+        .size(scaled(11.0, fs))
+        .color(muted),
         Space::new().height(20),
         // Confidence
         text("Tuning").size(scaled(16.0, fs)),
@@ -59,7 +64,9 @@ pub fn view<'a>(settings: &Settings) -> Element<'a, Message> {
         .spacing(12)
         .align_y(iced::Alignment::Center),
         Space::new().height(4),
-        text("How certain the detector must be that something is a face.").size(scaled(11.0, fs)),
+        text("How certain the detector must be that something is a face.")
+            .size(scaled(11.0, fs))
+            .color(muted),
         Space::new().height(12),
         // Blur strength
         row![
@@ -75,7 +82,9 @@ pub fn view<'a>(settings: &Settings) -> Element<'a, Message> {
         .spacing(12)
         .align_y(iced::Alignment::Center),
         Space::new().height(4),
-        text("How heavily faces are blurred.").size(scaled(11.0, fs)),
+        text("How heavily faces are blurred.")
+            .size(scaled(11.0, fs))
+            .color(muted),
         Space::new().height(12),
         // Lookahead
         row![
@@ -87,12 +96,14 @@ pub fn view<'a>(settings: &Settings) -> Element<'a, Message> {
         .align_y(iced::Alignment::Center),
         Space::new().height(4),
         text("Future frames to scan ahead. Helps blur faces before they enter the frame.")
-            .size(scaled(11.0, fs)),
+            .size(scaled(11.0, fs))
+            .color(muted),
         Space::new().height(20),
         // Restore defaults
         button(text("Restore Defaults").size(scaled(13.0, fs)))
             .on_press(Message::RestoreDefaults)
-            .padding([8, 16]),
+            .padding([8, 16])
+            .style(button::secondary),
     ]
     .spacing(0)
     .into()

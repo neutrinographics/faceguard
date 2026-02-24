@@ -2,9 +2,10 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use iced::widget::{button, checkbox, column, container, image, row, rule, text, Space};
-use iced::{Element, Length};
+use iced::{Element, Length, Theme};
 
 use crate::app::{scaled, Message};
+use crate::theme::muted_color;
 
 /// Card size in logical pixels.
 const CARD_SIZE: f32 = 76.0;
@@ -98,11 +99,12 @@ impl FacesWellState {
 }
 
 /// Render the faces well UI.
-pub fn view<'a>(state: &FacesWellState, fs: f32) -> Element<'a, Message> {
+pub fn view<'a>(state: &FacesWellState, fs: f32, theme: &Theme) -> Element<'a, Message> {
     if !state.has_faces() {
         return column![].into();
     }
 
+    let muted = muted_color(theme);
     let selected = state.selected_count();
     let total = state.total_count();
 
@@ -116,9 +118,10 @@ pub fn view<'a>(state: &FacesWellState, fs: f32) -> Element<'a, Message> {
     let header = row![
         checkbox(state.group_faces)
             .label("Group similar faces")
-            .on_toggle(Message::GroupFacesToggled),
+            .on_toggle(Message::GroupFacesToggled)
+            .text_size(scaled(12.0, fs)),
         Space::new().width(Length::Fill),
-        text(label).size(scaled(11.0, fs)),
+        text(label).size(scaled(11.0, fs)).color(muted),
     ]
     .spacing(8)
     .align_y(iced::Alignment::Center);
@@ -130,14 +133,16 @@ pub fn view<'a>(state: &FacesWellState, fs: f32) -> Element<'a, Message> {
     col = col.push(Space::new().height(8));
 
     if state.group_faces && !state.groups.is_empty() {
-        // Grouped view
         col = col.push(build_grouped_grid(state, fs));
     } else {
-        // Ungrouped view — show all individual faces
         col = col.push(build_individual_grid(state, fs));
     }
 
-    col.into()
+    container(col)
+        .padding(10)
+        .style(container::rounded_box)
+        .width(Length::Fill)
+        .into()
 }
 
 /// Build a grid of individual face cards.

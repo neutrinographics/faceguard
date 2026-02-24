@@ -399,31 +399,38 @@ impl App {
         let fs = self.settings.font_scale;
 
         // Tab bar
-        let tab_bar = row(Tab::ALL
-            .iter()
-            .map(|&tab| {
-                let label = text(tab.label()).size(scaled(13.0, fs));
-                let btn = button(label)
-                    .on_press(Message::TabSelected(tab))
-                    .padding([6, 14]);
-                if tab == self.active_tab {
-                    btn.style(button::primary).into()
-                } else {
-                    btn.style(button::text).into()
-                }
-            })
-            .collect::<Vec<_>>())
-        .spacing(2);
+        let tab_bar = container(
+            row(Tab::ALL
+                .iter()
+                .map(|&tab| {
+                    let label = text(tab.label()).size(scaled(13.0, fs));
+                    let btn = button(label)
+                        .on_press(Message::TabSelected(tab))
+                        .padding([8, 18]);
+                    if tab == self.active_tab {
+                        btn.style(button::primary).into()
+                    } else {
+                        btn.style(button::text).into()
+                    }
+                })
+                .collect::<Vec<_>>())
+            .spacing(2),
+        )
+        .padding([4, 8]);
 
         // Tab content
         let content: Element<'_, Message> = match self.active_tab {
-            Tab::Main => tabs::main_tab::view(
-                fs,
-                self.input_path.as_deref(),
-                self.output_path.as_deref(),
-                &self.processing,
-                &self.faces_well,
-            ),
+            Tab::Main => {
+                let theme = self.theme();
+                tabs::main_tab::view(
+                    fs,
+                    self.input_path.as_deref(),
+                    self.output_path.as_deref(),
+                    &self.processing,
+                    &self.faces_well,
+                    &theme,
+                )
+            }
             Tab::Settings => tabs::settings_tab::view(&self.settings),
             Tab::Appearance => tabs::appearance_tab::view(&self.settings),
             Tab::Privacy => tabs::privacy_tab::view(fs),
@@ -442,7 +449,7 @@ impl App {
         )
         .width(Length::Fill)
         .center_x(Length::Fill)
-        .padding([4, 0]);
+        .padding([6, 0]);
 
         column![tab_bar, tab_content, footer]
             .spacing(0)
