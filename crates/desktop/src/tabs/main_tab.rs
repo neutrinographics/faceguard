@@ -17,9 +17,32 @@ pub fn view<'a>(
 ) -> Element<'a, Message> {
     let muted = muted_color(theme);
 
-    // No file selected — empty state
     if input_path.is_none() {
-        let empty = column![
+        return empty_state(fs, muted);
+    }
+
+    if let ProcessingState::Complete = processing {
+        return complete_state(fs, muted, output_path);
+    }
+
+    if let ProcessingState::Error(ref e) = processing {
+        return error_state(fs, muted, e);
+    }
+
+    workflow_view(
+        fs,
+        muted,
+        input_path,
+        output_path,
+        processing,
+        faces_well,
+        theme,
+    )
+}
+
+fn empty_state(fs: f32, muted: iced::Color) -> Element<'static, Message> {
+    centered(
+        column![
             text("Drop a file here or click Browse")
                 .size(scaled(14.0, fs))
                 .color(muted),
@@ -32,24 +55,23 @@ pub fn view<'a>(
                 .size(scaled(12.0, fs))
                 .color(muted),
         ]
-        .align_x(iced::Alignment::Center);
+        .align_x(iced::Alignment::Center)
+        .into(),
+    )
+}
 
-        return container(empty)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
-            .into();
-    }
+fn complete_state<'a>(
+    fs: f32,
+    muted: iced::Color,
+    output_path: Option<&Path>,
+) -> Element<'a, Message> {
+    let filename = output_path
+        .and_then(|p| p.file_name())
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
 
-    // Complete state — centered
-    if let ProcessingState::Complete = processing {
-        let filename = output_path
-            .and_then(|p| p.file_name())
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
-
-        let done = column![
+    centered(
+        column![
             text("\u{2713} Complete").size(scaled(18.0, fs)),
             Space::new().height(4),
             text(filename).size(scaled(14.0, fs)).color(muted),
@@ -66,22 +88,17 @@ pub fn view<'a>(
                 .style(button::secondary),
         ]
         .align_x(iced::Alignment::Center)
-        .width(280);
+        .width(280)
+        .into(),
+    )
+}
 
-        return container(done)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
-            .into();
-    }
-
-    // Error state — centered
-    if let ProcessingState::Error(ref e) = processing {
-        let err = column![
+fn error_state<'a>(fs: f32, muted: iced::Color, error: &str) -> Element<'a, Message> {
+    centered(
+        column![
             text("Something went wrong").size(scaled(18.0, fs)),
             Space::new().height(8),
-            text(e.clone()).size(scaled(14.0, fs)).color(muted),
+            text(error.to_owned()).size(scaled(14.0, fs)).color(muted),
             Space::new().height(16),
             button(text("Try Again").size(scaled(14.0, fs)))
                 .on_press(Message::RunBlur)
@@ -95,16 +112,20 @@ pub fn view<'a>(
                 .style(button::secondary),
         ]
         .align_x(iced::Alignment::Center)
-        .width(280);
+        .width(280)
+        .into(),
+    )
+}
 
-        return container(err)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
-            .into();
-    }
-
+fn workflow_view<'a>(
+    fs: f32,
+    muted: iced::Color,
+    input_path: Option<&Path>,
+    output_path: Option<&Path>,
+    processing: &ProcessingState,
+    faces_well: &FacesWellState,
+    theme: &Theme,
+) -> Element<'a, Message> {
     let is_processing = matches!(
         processing,
         ProcessingState::Preparing
@@ -115,7 +136,6 @@ pub fn view<'a>(
 
     let mut col = column![].spacing(0);
 
-    // File rows (hidden during processing for cleaner focus)
     if !is_processing {
         col = col
             .push(file_row(
@@ -123,7 +143,6 @@ pub fn view<'a>(
                 "Input",
                 input_path,
                 Message::SelectInput,
-                true,
                 theme,
             ))
             .push(Space::new().height(6))
@@ -132,7 +151,6 @@ pub fn view<'a>(
                 "Output",
                 output_path,
                 Message::SelectOutput,
-                true,
                 theme,
             ))
             .push(Space::new().height(16));
@@ -140,37 +158,24 @@ pub fn view<'a>(
 
     match processing {
         ProcessingState::Idle => {
-            col = col.push(
-                button(text("Blur All Faces").size(scaled(14.0, fs)))
-                    .on_press(Message::RunBlur)
-                    .padding([12, 32])
-                    .width(Length::Fill),
-            );
-            col = col.push(Space::new().height(8));
-            col = col.push(
-                button(
-                    text("Choose Specific Faces...").size(scaled(14.0, fs)),
-                )
-                .on_press(Message::RunPreview)
-                .padding([12, 32])
-                .width(Length::Fill)
-                .style(button::secondary),
-            );
-        }
-        ProcessingState::Preparing => {
             col = col
                 .push(
-                    text("Preparing...")
-                        .size(scaled(14.0, fs))
-                        .color(muted),
+                    button(text("Blur All Faces").size(scaled(14.0, fs)))
+                        .on_press(Message::RunBlur)
+                        .padding([12, 32])
+                        .width(Length::Fill),
                 )
                 .push(Space::new().height(8))
                 .push(
-                    button(text("Cancel").size(scaled(13.0, fs)))
-                        .on_press(Message::CancelWork)
-                        .padding([8, 24])
+                    button(text("Choose Specific Faces...").size(scaled(14.0, fs)))
+                        .on_press(Message::RunPreview)
+                        .padding([12, 32])
+                        .width(Length::Fill)
                         .style(button::secondary),
                 );
+        }
+        ProcessingState::Preparing => {
+            col = col.push(progress_with_cancel(fs, muted, "Preparing...", None));
         }
         ProcessingState::Downloading(downloaded, total) => {
             let status = if *total > 0 {
@@ -179,83 +184,81 @@ pub fn view<'a>(
             } else {
                 format!("Downloading model... {} bytes", downloaded)
             };
-            col = col
-                .push(text(status).size(scaled(14.0, fs)).color(muted))
-                .push(Space::new().height(8))
-                .push(
-                    button(text("Cancel").size(scaled(13.0, fs)))
-                        .on_press(Message::CancelWork)
-                        .padding([8, 24])
-                        .style(button::secondary),
-                );
+            col = col.push(progress_with_cancel(fs, muted, &status, None));
         }
         ProcessingState::Scanning(current, total) => {
-            let pct = if *total > 0 {
-                *current as f32 / *total as f32 * 100.0
-            } else {
-                0.0
-            };
-            let status = if *total > 0 {
-                format!("Scanning frame {current}/{total}")
-            } else {
-                format!("Scanning frame {current}...")
-            };
-            col = col
-                .push(text(status).size(scaled(14.0, fs)).color(muted))
-                .push(Space::new().height(8))
-                .push(progress_bar(0.0..=100.0, pct))
-                .push(Space::new().height(8))
-                .push(
-                    button(text("Cancel").size(scaled(13.0, fs)))
-                        .on_press(Message::CancelWork)
-                        .padding([8, 24])
-                        .style(button::secondary),
-                );
+            let (status, pct) = frame_progress("Scanning", *current, *total);
+            col = col.push(progress_with_cancel(fs, muted, &status, Some(pct)));
         }
         ProcessingState::Previewed => {
-            col = col.push(faces_well::view(faces_well, fs, theme));
-            col = col.push(Space::new().height(12));
-            col = col.push(
-                button(text("Blur Selected Faces").size(scaled(14.0, fs)))
-                    .on_press(Message::RunBlur)
-                    .padding([12, 32])
-                    .width(Length::Fill),
-            );
-            col = col.push(Space::new().height(8));
-            col = col.push(
-                button(text("Re-scan").size(scaled(13.0, fs)))
-                    .on_press(Message::RunPreview)
-                    .style(button::text),
-            );
-        }
-        ProcessingState::Blurring(current, total) => {
-            let pct = if *total > 0 {
-                *current as f32 / *total as f32 * 100.0
-            } else {
-                0.0
-            };
-            let status = if *total > 0 {
-                format!("Processing frame {current}/{total}")
-            } else {
-                format!("Processing frame {current}...")
-            };
             col = col
-                .push(text(status).size(scaled(14.0, fs)).color(muted))
-                .push(Space::new().height(8))
-                .push(progress_bar(0.0..=100.0, pct))
+                .push(faces_well::view(faces_well, fs, theme))
+                .push(Space::new().height(12))
+                .push(
+                    button(text("Blur Selected Faces").size(scaled(14.0, fs)))
+                        .on_press(Message::RunBlur)
+                        .padding([12, 32])
+                        .width(Length::Fill),
+                )
                 .push(Space::new().height(8))
                 .push(
-                    button(text("Cancel").size(scaled(13.0, fs)))
-                        .on_press(Message::CancelWork)
-                        .padding([8, 24])
-                        .style(button::secondary),
+                    button(text("Re-scan").size(scaled(13.0, fs)))
+                        .on_press(Message::RunPreview)
+                        .style(button::text),
                 );
         }
-        // Complete and Error handled above as early returns
+        ProcessingState::Blurring(current, total) => {
+            let (status, pct) = frame_progress("Processing", *current, *total);
+            col = col.push(progress_with_cancel(fs, muted, &status, Some(pct)));
+        }
         _ => {}
     }
 
     col.into()
+}
+
+fn progress_with_cancel<'a>(
+    fs: f32,
+    muted: iced::Color,
+    status: &str,
+    progress: Option<f32>,
+) -> Element<'a, Message> {
+    let mut col = column![text(status.to_owned()).size(scaled(14.0, fs)).color(muted)].spacing(8);
+
+    if let Some(pct) = progress {
+        col = col.push(progress_bar(0.0..=100.0, pct));
+    }
+
+    col.push(
+        button(text("Cancel").size(scaled(13.0, fs)))
+            .on_press(Message::CancelWork)
+            .padding([8, 24])
+            .style(button::secondary),
+    )
+    .into()
+}
+
+fn frame_progress(verb: &str, current: usize, total: usize) -> (String, f32) {
+    let pct = if total > 0 {
+        current as f32 / total as f32 * 100.0
+    } else {
+        0.0
+    };
+    let status = if total > 0 {
+        format!("{verb} frame {current}/{total}")
+    } else {
+        format!("{verb} frame {current}...")
+    };
+    (status, pct)
+}
+
+fn centered(content: Element<'_, Message>) -> Element<'_, Message> {
+    container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .into()
 }
 
 fn file_row<'a>(
@@ -263,7 +266,6 @@ fn file_row<'a>(
     label: &str,
     path: Option<&Path>,
     on_browse: Message,
-    enabled: bool,
     theme: &Theme,
 ) -> Element<'a, Message> {
     let muted = muted_color(theme);
@@ -279,18 +281,16 @@ fn file_row<'a>(
             .into()
     };
 
-    let btn = button(text("Change").size(scaled(12.0, fs))).padding([6, 16]);
-    let btn = if enabled {
-        btn.on_press(on_browse).style(button::secondary)
-    } else {
-        btn.style(button::secondary)
-    };
+    let btn = button(text("Change").size(scaled(12.0, fs)))
+        .padding([6, 16])
+        .on_press(on_browse)
+        .style(button::secondary);
 
     let label_text = text(label.to_uppercase())
         .size(scaled(10.0, fs))
         .color(muted);
 
-    let content = row![column![label_text, display_text,].width(Length::Fill), btn,]
+    let content = row![column![label_text, display_text].width(Length::Fill), btn]
         .spacing(8)
         .align_y(iced::Alignment::Center);
 

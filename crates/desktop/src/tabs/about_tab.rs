@@ -1,14 +1,13 @@
 use iced::widget::{button, column, rule, text, Space};
-use iced::Element;
+use iced::{Element, Theme};
 
 use crate::app::{scaled, Message};
 use crate::theme::{muted_color, section_color};
 
-pub fn view(fs: f32) -> Element<'static, Message> {
+pub fn view(fs: f32, theme: &Theme) -> Element<'static, Message> {
+    let muted = muted_color(theme);
+    let section = section_color(theme);
     let version = env!("CARGO_PKG_VERSION");
-    let theme = crate::theme::resolve_theme(crate::settings::Appearance::System, false);
-    let muted = muted_color(&theme);
-    let section = section_color(&theme);
 
     column![
         text("Video Blur").size(scaled(20.0, fs)),

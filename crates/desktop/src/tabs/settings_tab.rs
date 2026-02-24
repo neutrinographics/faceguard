@@ -11,9 +11,41 @@ pub fn view<'a>(settings: &Settings, gpu_available: bool) -> Element<'a, Message
     let muted = muted_color(&theme);
     let section = section_color(&theme);
 
-    // --- BLUR SETTINGS ---
-    let blur_intensity_label = blur_intensity_label(settings.blur_strength);
-    let blur_section = column![
+    column![
+        blur_section(settings, fs, muted, section, gpu_available),
+        Space::new().height(20),
+        rule::horizontal(1),
+        Space::new().height(20),
+        detection_section(settings, fs, muted, section),
+        Space::new().height(20),
+        rule::horizontal(1),
+        Space::new().height(20),
+        appearance_section(settings, fs, section),
+        Space::new().height(24),
+        button(text("Restore Defaults").size(scaled(13.0, fs)))
+            .on_press(Message::RestoreDefaults)
+            .padding([8, 16])
+            .style(button::secondary),
+    ]
+    .spacing(0)
+    .into()
+}
+
+fn blur_section<'a>(
+    settings: &Settings,
+    fs: f32,
+    muted: iced::Color,
+    section: iced::Color,
+    gpu_available: bool,
+) -> Element<'a, Message> {
+    let intensity_label = blur_intensity_label(settings.blur_strength);
+    let backend_label = if gpu_available {
+        "Blur backend: GPU accelerated"
+    } else {
+        "Blur backend: CPU"
+    };
+
+    column![
         text("BLUR SETTINGS").size(scaled(12.0, fs)).color(section),
         Space::new().height(12),
         row![
@@ -43,7 +75,7 @@ pub fn view<'a>(settings: &Settings, gpu_available: bool) -> Element<'a, Message
                 Message::BlurStrengthChanged
             )
             .step(2u32),
-            text(blur_intensity_label).size(scaled(13.0, fs)),
+            text(intensity_label).size(scaled(13.0, fs)),
         ]
         .spacing(12)
         .align_y(iced::Alignment::Center),
@@ -52,19 +84,21 @@ pub fn view<'a>(settings: &Settings, gpu_available: bool) -> Element<'a, Message
             .size(scaled(12.0, fs))
             .color(muted),
         Space::new().height(8),
-        text(if gpu_available {
-            "Blur backend: GPU accelerated"
-        } else {
-            "Blur backend: CPU"
-        })
-        .size(scaled(11.0, fs))
-        .color(muted),
+        text(backend_label).size(scaled(11.0, fs)).color(muted),
     ]
-    .spacing(0);
+    .spacing(0)
+    .into()
+}
 
-    // --- DETECTION ---
+fn detection_section<'a>(
+    settings: &Settings,
+    fs: f32,
+    muted: iced::Color,
+    section: iced::Color,
+) -> Element<'a, Message> {
     let sensitivity_label = sensitivity_label(settings.confidence);
-    let detection_section = column![
+
+    column![
         text("DETECTION").size(scaled(12.0, fs)).color(section),
         Space::new().height(12),
         row![
@@ -91,10 +125,16 @@ pub fn view<'a>(settings: &Settings, gpu_available: bool) -> Element<'a, Message
             .size(scaled(12.0, fs))
             .color(muted),
     ]
-    .spacing(0);
+    .spacing(0)
+    .into()
+}
 
-    // --- APPEARANCE ---
-    let appearance_section = column![
+fn appearance_section<'a>(
+    settings: &Settings,
+    fs: f32,
+    section: iced::Color,
+) -> Element<'a, Message> {
+    column![
         text("APPEARANCE").size(scaled(12.0, fs)).color(section),
         Space::new().height(12),
         row![
@@ -119,24 +159,6 @@ pub fn view<'a>(settings: &Settings, gpu_available: bool) -> Element<'a, Message
         ]
         .spacing(12)
         .align_y(iced::Alignment::Center),
-    ]
-    .spacing(0);
-
-    column![
-        blur_section,
-        Space::new().height(20),
-        rule::horizontal(1),
-        Space::new().height(20),
-        detection_section,
-        Space::new().height(20),
-        rule::horizontal(1),
-        Space::new().height(20),
-        appearance_section,
-        Space::new().height(24),
-        button(text("Restore Defaults").size(scaled(13.0, fs)))
-            .on_press(Message::RestoreDefaults)
-            .padding([8, 16])
-            .style(button::secondary),
     ]
     .spacing(0)
     .into()

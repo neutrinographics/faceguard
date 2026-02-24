@@ -57,8 +57,7 @@ impl ModelCache {
                     log::info!("YOLO session built in {:?}", start.elapsed());
                     let input_size = onnx_yolo_detector::session_input_size(&session);
                     *session_slot.input_size.lock().unwrap() = input_size;
-                    *session_slot.session.lock().unwrap() =
-                        Some(Arc::new(Mutex::new(session)));
+                    *session_slot.session.lock().unwrap() = Some(Arc::new(Mutex::new(session)));
                 } else {
                     log::warn!("Failed to build YOLO session");
                 }
