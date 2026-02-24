@@ -130,9 +130,10 @@ impl FaceDetector for OnnxYoloDetector {
         // 1. Preprocess: letterbox + normalize → NCHW float32 (reuses pre-allocated buffer)
         let (scale, pad_x, pad_y) = letterbox_into(frame, self.input_size, &mut self.letterbox_buf);
 
-        // 2. Inference (lock session, extract tensor data, then release)
+        // 2. Inference + parse detections (hold lock only while tensor data is needed)
         let input_value = ort::value::TensorRef::from_array_view(self.letterbox_buf.view())?;
-        let (data_vec, shape_vec) = {
+        let confidence = self.confidence;
+        let filtered = {
             let mut session = self
                 .session
                 .lock()
@@ -142,86 +143,82 @@ impl FaceDetector for OnnxYoloDetector {
                 return Err("YOLO model produced no outputs".into());
             }
             let tensor = outputs[0].try_extract_array::<f32>()?;
-            let shape = tensor.shape().to_vec();
-            let data = tensor.as_slice().ok_or("Cannot get tensor slice")?.to_vec();
-            (data, shape)
-        };
-        let shape = &shape_vec;
+            let shape = tensor.shape();
+            let data = tensor.as_slice().ok_or("Cannot get tensor slice")?;
 
-        // YOLO output shape is [1, num_features, num_detections] (transposed)
-        // or [1, num_detections, num_features]. Handle both.
-        let (num_dets, num_feats) = if shape.len() == 3 {
-            if shape[1] < shape[2] {
-                // [1, features, detections] → transpose
-                (shape[2], shape[1])
-            } else {
-                (shape[1], shape[2])
-            }
-        } else {
-            return Err(format!("Unexpected YOLO output shape: {shape:?}").into());
-        };
-
-        let data = &data_vec;
-        let transposed = shape.len() == 3 && shape[1] < shape[2];
-
-        // 3. Parse detections using zero-allocation indexing
-        let feat = |det_idx: usize, feat_idx: usize| -> f32 {
-            if transposed {
-                data[feat_idx * num_dets + det_idx]
-            } else {
-                data[det_idx * num_feats + feat_idx]
-            }
-        };
-
-        let mut raw_dets = Vec::new();
-        for i in 0..num_dets {
-            if num_feats < 5 {
-                continue;
-            }
-            let conf = feat(i, 4) as f64;
-            if conf < self.confidence {
-                continue;
-            }
-
-            let cx = feat(i, 0) as f64;
-            let cy = feat(i, 1) as f64;
-            let w = feat(i, 2) as f64;
-            let h = feat(i, 3) as f64;
-
-            // Convert from letterbox coords back to original frame coords
-            let x1 = ((cx - w / 2.0) - pad_x as f64) / scale;
-            let y1 = ((cy - h / 2.0) - pad_y as f64) / scale;
-            let x2 = ((cx + w / 2.0) - pad_x as f64) / scale;
-            let y2 = ((cy + h / 2.0) - pad_y as f64) / scale;
-
-            // Parse keypoints if available, filtering by confidence
-            let keypoints = if num_feats >= 5 + NUM_KEYPOINT_VALUES {
-                let mut pts = [(0.0f64, 0.0f64); 5];
-                for k in 0..5 {
-                    let kconf = feat(i, 5 + k * 3 + 2) as f64;
-                    if kconf >= KEYPOINT_CONF_THRESH {
-                        let kx = feat(i, 5 + k * 3) as f64;
-                        let ky = feat(i, 5 + k * 3 + 1) as f64;
-                        pts[k] = ((kx - pad_x as f64) / scale, (ky - pad_y as f64) / scale);
-                    }
+            // YOLO output shape is [1, num_features, num_detections] (transposed)
+            // or [1, num_detections, num_features]. Handle both.
+            let (num_dets, num_feats) = if shape.len() == 3 {
+                if shape[1] < shape[2] {
+                    (shape[2], shape[1])
+                } else {
+                    (shape[1], shape[2])
                 }
-                Some(pts)
             } else {
-                None
+                return Err(format!("Unexpected YOLO output shape: {shape:?}").into());
             };
 
-            raw_dets.push(RawDetection {
-                x1,
-                y1,
-                x2,
-                y2,
-                confidence: conf,
-                keypoints,
-            });
-        }
+            let transposed = shape.len() == 3 && shape[1] < shape[2];
 
-        // 4. NMS
-        let filtered = nms(&mut raw_dets, NMS_IOU_THRESH);
+            // 3. Parse detections directly from tensor (no full copy)
+            let feat = |det_idx: usize, feat_idx: usize| -> f32 {
+                if transposed {
+                    data[feat_idx * num_dets + det_idx]
+                } else {
+                    data[det_idx * num_feats + feat_idx]
+                }
+            };
+
+            let mut raw_dets = Vec::new();
+            for i in 0..num_dets {
+                if num_feats < 5 {
+                    continue;
+                }
+                let conf = feat(i, 4) as f64;
+                if conf < confidence {
+                    continue;
+                }
+
+                let cx = feat(i, 0) as f64;
+                let cy = feat(i, 1) as f64;
+                let w = feat(i, 2) as f64;
+                let h = feat(i, 3) as f64;
+
+                // Convert from letterbox coords back to original frame coords
+                let x1 = ((cx - w / 2.0) - pad_x as f64) / scale;
+                let y1 = ((cy - h / 2.0) - pad_y as f64) / scale;
+                let x2 = ((cx + w / 2.0) - pad_x as f64) / scale;
+                let y2 = ((cy + h / 2.0) - pad_y as f64) / scale;
+
+                // Parse keypoints if available, filtering by confidence
+                let keypoints = if num_feats >= 5 + NUM_KEYPOINT_VALUES {
+                    let mut pts = [(0.0f64, 0.0f64); 5];
+                    for k in 0..5 {
+                        let kconf = feat(i, 5 + k * 3 + 2) as f64;
+                        if kconf >= KEYPOINT_CONF_THRESH {
+                            let kx = feat(i, 5 + k * 3) as f64;
+                            let ky = feat(i, 5 + k * 3 + 1) as f64;
+                            pts[k] = ((kx - pad_x as f64) / scale, (ky - pad_y as f64) / scale);
+                        }
+                    }
+                    Some(pts)
+                } else {
+                    None
+                };
+
+                raw_dets.push(RawDetection {
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    confidence: conf,
+                    keypoints,
+                });
+            }
+
+            // 4. NMS (still inside lock, but cheap compared to inference)
+            nms(&mut raw_dets, NMS_IOU_THRESH)
+        };
 
         // 5. Track
         let tracker_dets: Vec<TrackerDetection> = filtered

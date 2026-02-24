@@ -40,7 +40,7 @@ A 4.7MB `Array4<f32>` tensor is heap-allocated for every detection frame. At 30f
 
 ---
 
-### 5. YOLO output copied to Vec under lock
+### 5. ~~YOLO output copied to Vec under lock~~
 **File**: `crates/core/src/detection/infrastructure/onnx_yolo_detector.rs:139`
 
 Entire YOLO output tensor (8400 detections x 20 features = ~672KB) is copied to a `Vec` while holding the session mutex.
