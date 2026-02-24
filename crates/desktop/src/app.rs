@@ -98,6 +98,7 @@ pub enum Message {
     HighContrastChanged(bool),
     FontScaleChanged(f32),
     PollSystemTheme,
+    FileDropped(PathBuf),
 }
 
 // ---------------------------------------------------------------------------
@@ -396,6 +397,19 @@ impl App {
                 self.settings.save();
             }
             Message::PollSystemTheme => {}
+            Message::FileDropped(path) => {
+                let ext = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e.to_lowercase())
+                    .unwrap_or_default();
+                let supported = [
+                    "mp4", "avi", "mov", "mkv", "jpg", "jpeg", "png", "bmp", "tiff", "webp",
+                ];
+                if supported.contains(&ext.as_str()) {
+                    return self.update(Message::InputSelected(Some(path)));
+                }
+            }
         }
         Task::none()
     }
@@ -476,6 +490,15 @@ impl App {
         if self.worker_rx.is_some() || self.preview_rx.is_some() {
             subs.push(iced::time::every(Duration::from_millis(50)).map(|_| Message::WorkerTick));
         }
+
+        // Listen for file drops onto the window
+        subs.push(iced::event::listen_with(|event, _status, _id| {
+            if let iced::Event::Window(iced::window::Event::FileDropped(path)) = event {
+                Some(Message::FileDropped(path))
+            } else {
+                None
+            }
+        }));
 
         Subscription::batch(subs)
     }
