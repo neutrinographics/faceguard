@@ -69,8 +69,18 @@ echo "    Signature OK"
 # --- Step 2: Create DMG ---
 echo "==> Creating DMG..."
 rm -f "$DMG_PATH"
-hdiutil create -volname "$APP_NAME" -srcfolder "$APP_PATH" \
+
+# Stage the .app and an Applications shortcut in a temp folder
+DMG_STAGING="$BUNDLE_DIR/dmg_staging"
+rm -rf "$DMG_STAGING"
+mkdir -p "$DMG_STAGING"
+cp -R "$APP_PATH" "$DMG_STAGING/"
+ln -s /Applications "$DMG_STAGING/Applications"
+
+hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_STAGING" \
     -ov -format UDZO "$DMG_PATH"
+
+rm -rf "$DMG_STAGING"
 
 # Sign the DMG too
 codesign --force --timestamp --sign "$SIGNING_IDENTITY" "$DMG_PATH"
