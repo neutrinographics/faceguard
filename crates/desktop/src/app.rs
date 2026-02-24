@@ -13,6 +13,7 @@ use crate::tabs;
 use crate::theme;
 use crate::widgets::faces_well::FacesWellState;
 use crate::workers::blur_worker::{self, BlurParams, WorkerMessage};
+use crate::workers::model_cache::ModelCache;
 use crate::workers::preview_worker::{self, PreviewMessage, PreviewParams};
 use video_blur_core::shared::region::Region;
 
@@ -106,6 +107,8 @@ pub struct App {
     pub faces_well: FacesWellState,
     /// Cached detection results from preview pass (for reuse in blur).
     detection_cache: Option<HashMap<usize, Vec<Region>>>,
+    /// Pre-loaded model paths shared across workers.
+    model_cache: Arc<ModelCache>,
     preview_rx: Option<Receiver<PreviewMessage>>,
     worker_rx: Option<Receiver<WorkerMessage>>,
     worker_cancel: Option<Arc<AtomicBool>>,
@@ -122,6 +125,7 @@ impl App {
                 processing: ProcessingState::Idle,
                 faces_well: FacesWellState::new(),
                 detection_cache: None,
+                model_cache: ModelCache::new(),
                 preview_rx: None,
                 worker_rx: None,
                 worker_cancel: None,
@@ -217,6 +221,7 @@ impl App {
                     let params = PreviewParams {
                         input_path: input,
                         confidence: self.settings.confidence,
+                        model_cache: self.model_cache.clone(),
                     };
                     let (rx, cancel) = preview_worker::spawn(params);
                     self.preview_rx = Some(rx);
@@ -238,6 +243,7 @@ impl App {
                         lookahead: self.settings.lookahead,
                         detection_cache: self.detection_cache.clone(),
                         blur_ids,
+                        model_cache: self.model_cache.clone(),
                     };
                     let (rx, cancel) = blur_worker::spawn(params);
                     self.worker_rx = Some(rx);
