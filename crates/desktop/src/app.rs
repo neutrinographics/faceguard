@@ -16,7 +16,10 @@ use crate::workers::blur_worker::{self, BlurParams, WorkerMessage};
 use crate::workers::preview_worker::{self, PreviewMessage, PreviewParams};
 use video_blur_core::shared::region::Region;
 
+use iced::widget::operation;
+
 const WEBSITE_URL: &str = "https://www.neutrinographics.com/";
+const SCROLL_ID: &str = "tab-scroll";
 
 // ---------------------------------------------------------------------------
 // Tab enum
@@ -131,6 +134,7 @@ impl App {
         match message {
             Message::TabSelected(tab) => {
                 self.active_tab = tab;
+                return operation::snap_to(SCROLL_ID, operation::RelativeOffset::START);
             }
             Message::OpenWebsite => {
                 let _ = open::that(WEBSITE_URL);
@@ -444,23 +448,26 @@ impl App {
 
         // Tab content
         let content: Element<'_, Message> = match self.active_tab {
-            Tab::Blur => {
-                tabs::main_tab::view(
-                    fs,
-                    self.input_path.as_deref(),
-                    self.output_path.as_deref(),
-                    &self.processing,
-                    &self.faces_well,
-                    &current_theme,
-                )
-            }
+            Tab::Blur => tabs::main_tab::view(
+                fs,
+                self.input_path.as_deref(),
+                self.output_path.as_deref(),
+                &self.processing,
+                &self.faces_well,
+                &current_theme,
+            ),
             Tab::Settings => tabs::settings_tab::view(&self.settings),
             Tab::About => tabs::about_tab::view(fs),
         };
 
-        let tab_content = container(scrollable(content).height(Length::Fill))
-            .padding(24)
-            .height(Length::Fill);
+        let tab_content = container(
+            scrollable(content)
+                .id(iced::widget::Id::new(SCROLL_ID))
+                .spacing(4)
+                .height(Length::Fill),
+        )
+        .padding(24)
+        .height(Length::Fill);
 
         column![tab_bar, tab_content]
             .spacing(0)

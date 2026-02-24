@@ -21,7 +21,9 @@
       "Bash(grep:*)",
       "Bash(/Users/joel/.cargo/bin/cargo build:*)",
       "Bash(/Users/joel/.cargo/bin/cargo clippy:*)",
-      "Bash(cargo build:*)"
+      "Bash(cargo build:*)",
+      "WebFetch(domain:docs.rs)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }
