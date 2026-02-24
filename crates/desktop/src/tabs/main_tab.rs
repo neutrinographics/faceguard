@@ -4,16 +4,21 @@ use iced::widget::{button, column, progress_bar, row, text, Space};
 use iced::{Element, Length};
 
 use crate::app::{scaled, Message, ProcessingState};
+use crate::widgets::faces_well::{self, FacesWellState};
 
 pub fn view<'a>(
     fs: f32,
     input_path: Option<&Path>,
     output_path: Option<&Path>,
     processing: &ProcessingState,
+    faces_well: &FacesWellState,
 ) -> Element<'a, Message> {
     let is_processing = matches!(
         processing,
-        ProcessingState::Preparing | ProcessingState::Downloading(..) | ProcessingState::Blurring(..)
+        ProcessingState::Preparing
+            | ProcessingState::Downloading(..)
+            | ProcessingState::Scanning(..)
+            | ProcessingState::Blurring(..)
     );
 
     let mut col = column![
@@ -43,11 +48,30 @@ pub fn view<'a>(
 
         match processing {
             ProcessingState::Idle => {
-                col = col.push(
-                    button(text("Run").size(scaled(13.0, fs)))
-                        .on_press(Message::RunBlur)
-                        .padding([8, 24]),
-                );
+                let is_image = input_path
+                    .and_then(|p| p.extension())
+                    .and_then(|e| e.to_str())
+                    .map(|e| {
+                        ["jpg", "jpeg", "png", "bmp", "tiff", "tif", "webp"]
+                            .contains(&e.to_lowercase().as_str())
+                    })
+                    .unwrap_or(false);
+
+                if is_image {
+                    // Images go straight to blur (no preview needed)
+                    col = col.push(
+                        button(text("Run").size(scaled(13.0, fs)))
+                            .on_press(Message::RunBlur)
+                            .padding([8, 24]),
+                    );
+                } else {
+                    // Videos get a preview step
+                    col = col.push(
+                        button(text("Choose which faces to blur...").size(scaled(13.0, fs)))
+                            .on_press(Message::RunPreview)
+                            .padding([8, 24]),
+                    );
+                }
             }
             ProcessingState::Preparing => {
                 col = col
@@ -55,7 +79,7 @@ pub fn view<'a>(
                     .push(Space::new().height(8))
                     .push(
                         button(text("Cancel").size(scaled(13.0, fs)))
-                            .on_press(Message::CancelBlur)
+                            .on_press(Message::CancelWork)
                             .padding([6, 16]),
                     );
             }
@@ -71,9 +95,49 @@ pub fn view<'a>(
                     .push(Space::new().height(8))
                     .push(
                         button(text("Cancel").size(scaled(13.0, fs)))
-                            .on_press(Message::CancelBlur)
+                            .on_press(Message::CancelWork)
                             .padding([6, 16]),
                     );
+            }
+            ProcessingState::Scanning(current, total) => {
+                let pct = if *total > 0 {
+                    *current as f32 / *total as f32 * 100.0
+                } else {
+                    0.0
+                };
+                let status = if *total > 0 {
+                    format!("Scanning frame {current}/{total}")
+                } else {
+                    format!("Scanning frame {current}...")
+                };
+                col = col
+                    .push(text(status).size(scaled(13.0, fs)))
+                    .push(Space::new().height(8))
+                    .push(progress_bar(0.0..=100.0, pct))
+                    .push(Space::new().height(8))
+                    .push(
+                        button(text("Cancel").size(scaled(13.0, fs)))
+                            .on_press(Message::CancelWork)
+                            .padding([6, 16]),
+                    );
+            }
+            ProcessingState::Previewed => {
+                // Show faces well + run button
+                col = col.push(faces_well::view(faces_well, fs));
+                col = col.push(Space::new().height(12));
+                col = col.push(
+                    row![
+                        button(text("Run").size(scaled(13.0, fs)))
+                            .on_press(Message::RunBlur)
+                            .padding([8, 24]),
+                        Space::new().width(8),
+                        button(text("Re-scan").size(scaled(13.0, fs)))
+                            .on_press(Message::RunPreview)
+                            .padding([8, 24])
+                            .style(button::secondary),
+                    ]
+                    .spacing(8),
+                );
             }
             ProcessingState::Blurring(current, total) => {
                 let pct = if *total > 0 {
@@ -93,7 +157,7 @@ pub fn view<'a>(
                     .push(Space::new().height(8))
                     .push(
                         button(text("Cancel").size(scaled(13.0, fs)))
-                            .on_press(Message::CancelBlur)
+                            .on_press(Message::CancelWork)
                             .padding([6, 16]),
                     );
             }

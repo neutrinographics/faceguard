@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -10,12 +11,14 @@ use video_blur_core::detection::domain::face_region_builder::{FaceRegionBuilder,
 use video_blur_core::detection::domain::region_merger::RegionMerger;
 use video_blur_core::detection::domain::region_smoother::{RegionSmoother, DEFAULT_ALPHA};
 use video_blur_core::detection::infrastructure::bytetrack_tracker::ByteTracker;
+use video_blur_core::detection::infrastructure::cached_face_detector::CachedFaceDetector;
 use video_blur_core::detection::infrastructure::model_resolver;
 use video_blur_core::detection::infrastructure::onnx_blazeface_detector::OnnxBlazefaceDetector;
 use video_blur_core::detection::infrastructure::onnx_yolo_detector::OnnxYoloDetector;
 use video_blur_core::detection::infrastructure::skip_frame_detector::SkipFrameDetector;
 use video_blur_core::pipeline::blur_faces_use_case::BlurFacesUseCase;
 use video_blur_core::pipeline::blur_image_use_case::BlurImageUseCase;
+use video_blur_core::shared::region::Region;
 use video_blur_core::video::infrastructure::ffmpeg_reader::FfmpegReader;
 use video_blur_core::video::infrastructure::ffmpeg_writer::FfmpegWriter;
 use video_blur_core::video::infrastructure::image_file_reader::ImageFileReader;
@@ -52,6 +55,10 @@ pub struct BlurParams {
     pub confidence: u32,
     pub blur_strength: u32,
     pub lookahead: u32,
+    /// Cached detection results from preview pass (skip re-detecting).
+    pub detection_cache: Option<HashMap<usize, Vec<Region>>>,
+    /// If set, only blur these face IDs. None = blur all.
+    pub blur_ids: Option<HashSet<u32>>,
 }
 
 fn is_image(path: &std::path::Path) -> bool {
@@ -90,40 +97,45 @@ fn run_blur(
     let confidence = params.confidence as f64 / 100.0;
     let image_mode = is_image(input);
 
-    // Resolve model
-    let (model_name, model_url) = match params.detector {
-        crate::settings::Detector::Mediapipe => (BLAZEFACE_MODEL_NAME, BLAZEFACE_MODEL_URL),
-        crate::settings::Detector::Yolo => (YOLO_MODEL_NAME, YOLO_MODEL_URL),
-    };
-
-    let tx_dl = tx.clone();
-    let model_path = model_resolver::resolve(
-        model_name,
-        model_url,
-        None,
-        Some(Box::new(move |downloaded, total| {
-            let _ = tx_dl.send(WorkerMessage::DownloadProgress(downloaded, total));
-        })),
-    )?;
-
-    if cancelled.load(Ordering::Relaxed) {
-        return Err("Cancelled".into());
-    }
-
-    // Build detector
+    // Build detector: use cached if available, otherwise fresh
     let detector: Box<dyn video_blur_core::detection::domain::face_detector::FaceDetector> =
-        match params.detector {
-            crate::settings::Detector::Mediapipe => {
-                let det = OnnxBlazefaceDetector::new(&model_path, confidence, 30.0)?;
-                Box::new(det)
+        if let Some(cache) = params.detection_cache.clone() {
+            Box::new(CachedFaceDetector::new(cache))
+        } else {
+            // Resolve model
+            let (model_name, model_url) = match params.detector {
+                crate::settings::Detector::Mediapipe => (BLAZEFACE_MODEL_NAME, BLAZEFACE_MODEL_URL),
+                crate::settings::Detector::Yolo => (YOLO_MODEL_NAME, YOLO_MODEL_URL),
+            };
+
+            let tx_dl = tx.clone();
+            let model_path = model_resolver::resolve(
+                model_name,
+                model_url,
+                None,
+                Some(Box::new(move |downloaded, total| {
+                    let _ = tx_dl.send(WorkerMessage::DownloadProgress(downloaded, total));
+                })),
+            )?;
+
+            if cancelled.load(Ordering::Relaxed) {
+                return Err("Cancelled".into());
             }
-            crate::settings::Detector::Yolo => {
-                let smoother = RegionSmoother::new(DEFAULT_ALPHA);
-                let region_builder =
-                    FaceRegionBuilder::new(DEFAULT_PADDING, Some(Box::new(smoother)));
-                let tracker = ByteTracker::new(TRACKER_MAX_LOST);
-                let det = OnnxYoloDetector::new(&model_path, region_builder, tracker, confidence)?;
-                Box::new(SkipFrameDetector::new(Box::new(det), 2)?)
+
+            match params.detector {
+                crate::settings::Detector::Mediapipe => {
+                    let det = OnnxBlazefaceDetector::new(&model_path, confidence, 30.0)?;
+                    Box::new(det)
+                }
+                crate::settings::Detector::Yolo => {
+                    let smoother = RegionSmoother::new(DEFAULT_ALPHA);
+                    let region_builder =
+                        FaceRegionBuilder::new(DEFAULT_PADDING, Some(Box::new(smoother)));
+                    let tracker = ByteTracker::new(TRACKER_MAX_LOST);
+                    let det =
+                        OnnxYoloDetector::new(&model_path, region_builder, tracker, confidence)?;
+                    Box::new(SkipFrameDetector::new(Box::new(det), 2)?)
+                }
             }
         };
 
@@ -141,8 +153,14 @@ fn run_blur(
         let image_writer: Box<dyn video_blur_core::video::domain::image_writer::ImageWriter> =
             Box::new(ImageFileWriter::new());
 
-        let mut use_case =
-            BlurImageUseCase::new(reader, image_writer, detector, blurrer, None, None);
+        let mut use_case = BlurImageUseCase::new(
+            reader,
+            image_writer,
+            detector,
+            blurrer,
+            params.blur_ids.clone(),
+            None,
+        );
         use_case.execute(input, output)?;
     } else {
         // Video mode
@@ -167,7 +185,7 @@ fn run_blur(
             blurrer,
             merger,
             Some(params.lookahead as usize),
-            None,
+            params.blur_ids.clone(),
             None,
             Some(progress),
             Some(cancelled.clone()),

@@ -22,3 +22,5 @@ log = { workspace = true }
 env_logger = { workspace = true }
 crossbeam-channel = { workspace = true }
 image = { workspace = true }
+tempfile = { workspace = true }
+ort = { workspace = true }

@@ -5168,9 +5168,11 @@ dependencies = [
  "image",
  "log",
  "open",
+ "ort",
  "rfd",
  "serde",
  "serde_json",
+ "tempfile",
  "video-blur-core",
 ]
 

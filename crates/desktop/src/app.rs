@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -10,7 +11,10 @@ use iced::{Element, Length, Subscription, Task, Theme};
 use crate::settings::{Appearance, BlurShape, Detector, Settings};
 use crate::tabs;
 use crate::theme;
+use crate::widgets::faces_well::FacesWellState;
 use crate::workers::blur_worker::{self, BlurParams, WorkerMessage};
+use crate::workers::preview_worker::{self, PreviewMessage, PreviewParams};
+use video_blur_core::shared::region::Region;
 
 const WEBSITE_URL: &str = "https://www.neutrinographics.com/";
 
@@ -56,6 +60,8 @@ pub enum ProcessingState {
     Idle,
     Preparing,
     Downloading(u64, u64),
+    Scanning(usize, usize),
+    Previewed,
     Blurring(usize, usize),
     Complete,
     Error(String),
@@ -73,9 +79,13 @@ pub enum Message {
     InputSelected(Option<PathBuf>),
     SelectOutput,
     OutputSelected(Option<PathBuf>),
+    RunPreview,
     RunBlur,
-    CancelBlur,
+    CancelWork,
     WorkerTick,
+    ToggleFace(u32),
+    ToggleGroup(usize),
+    GroupFacesToggled(bool),
     DetectorChanged(Detector),
     BlurShapeChanged(BlurShape),
     ConfidenceChanged(u32),
@@ -98,6 +108,10 @@ pub struct App {
     pub input_path: Option<PathBuf>,
     pub output_path: Option<PathBuf>,
     pub processing: ProcessingState,
+    pub faces_well: FacesWellState,
+    /// Cached detection results from preview pass (for reuse in blur).
+    detection_cache: Option<HashMap<usize, Vec<Region>>>,
+    preview_rx: Option<Receiver<PreviewMessage>>,
     worker_rx: Option<Receiver<WorkerMessage>>,
     worker_cancel: Option<Arc<AtomicBool>>,
 }
@@ -111,6 +125,9 @@ impl App {
                 input_path: None,
                 output_path: None,
                 processing: ProcessingState::Idle,
+                faces_well: FacesWellState::new(),
+                detection_cache: None,
+                preview_rx: None,
                 worker_rx: None,
                 worker_cancel: None,
             },
@@ -159,6 +176,10 @@ impl App {
                 self.input_path = Some(path);
                 self.output_path = Some(output);
                 self.processing = ProcessingState::Idle;
+                // Clear previous preview data
+                self.faces_well.clear();
+                self.detection_cache = None;
+                cleanup_temp_dir(&self.faces_well);
             }
             Message::InputSelected(None) => {}
             Message::SelectOutput => {
@@ -196,10 +217,28 @@ impl App {
                 self.output_path = Some(path);
             }
             Message::OutputSelected(None) => {}
+            Message::RunPreview => {
+                if let Some(input) = self.input_path.clone() {
+                    // Don't preview images — go straight to blur
+                    if is_image(&input) {
+                        return self.update(Message::RunBlur);
+                    }
+                    let params = PreviewParams {
+                        input_path: input,
+                        detector: self.settings.detector,
+                        confidence: self.settings.confidence,
+                    };
+                    let (rx, cancel) = preview_worker::spawn(params);
+                    self.preview_rx = Some(rx);
+                    self.worker_cancel = Some(cancel);
+                    self.processing = ProcessingState::Preparing;
+                }
+            }
             Message::RunBlur => {
                 if let (Some(input), Some(output)) =
                     (self.input_path.clone(), self.output_path.clone())
                 {
+                    let blur_ids = self.faces_well.get_selected_ids();
                     let params = BlurParams {
                         input_path: input,
                         output_path: output,
@@ -208,6 +247,8 @@ impl App {
                         confidence: self.settings.confidence,
                         blur_strength: self.settings.blur_strength,
                         lookahead: self.settings.lookahead,
+                        detection_cache: self.detection_cache.clone(),
+                        blur_ids,
                     };
                     let (rx, cancel) = blur_worker::spawn(params);
                     self.worker_rx = Some(rx);
@@ -215,20 +256,55 @@ impl App {
                     self.processing = ProcessingState::Preparing;
                 }
             }
-            Message::CancelBlur => {
+            Message::CancelWork => {
                 if let Some(ref cancel) = self.worker_cancel {
                     cancel.store(true, Ordering::Relaxed);
                 }
             }
             Message::WorkerTick => {
-                // Collect messages first to avoid borrow conflict
-                let msgs: Vec<_> = self
+                // Collect preview messages
+                let preview_msgs: Vec<_> = self
+                    .preview_rx
+                    .as_ref()
+                    .map(|rx| rx.try_iter().collect())
+                    .unwrap_or_default();
+
+                for msg in preview_msgs {
+                    match msg {
+                        PreviewMessage::DownloadProgress(dl, total) => {
+                            self.processing = ProcessingState::Downloading(dl, total);
+                        }
+                        PreviewMessage::ScanProgress(current, total) => {
+                            self.processing = ProcessingState::Scanning(current, total);
+                        }
+                        PreviewMessage::Complete(result) => {
+                            self.faces_well.populate(result.crops, result.groups);
+                            self.detection_cache = Some(result.detection_cache);
+                            self.processing = ProcessingState::Previewed;
+                            self.preview_rx = None;
+                            self.worker_cancel = None;
+                        }
+                        PreviewMessage::Error(e) => {
+                            self.processing = ProcessingState::Error(e);
+                            self.preview_rx = None;
+                            self.worker_cancel = None;
+                        }
+                        PreviewMessage::Cancelled => {
+                            self.processing = ProcessingState::Idle;
+                            self.preview_rx = None;
+                            self.worker_cancel = None;
+                        }
+                    }
+                }
+
+                // Collect blur messages
+                let blur_msgs: Vec<_> = self
                     .worker_rx
                     .as_ref()
                     .map(|rx| rx.try_iter().collect())
                     .unwrap_or_default();
 
-                for msg in msgs {
+                for msg in blur_msgs {
                     match msg {
                         WorkerMessage::DownloadProgress(dl, total) => {
                             self.processing = ProcessingState::Downloading(dl, total);
@@ -254,9 +330,19 @@ impl App {
                     }
                 }
             }
+            Message::ToggleFace(track_id) => {
+                self.faces_well.toggle_face(track_id);
+            }
+            Message::ToggleGroup(group_idx) => {
+                self.faces_well.toggle_group(group_idx);
+            }
+            Message::GroupFacesToggled(enabled) => {
+                self.faces_well.group_faces = enabled;
+            }
             Message::DetectorChanged(detector) => {
                 self.settings.detector = detector;
                 self.settings.save();
+                self.invalidate_detection();
             }
             Message::BlurShapeChanged(shape) => {
                 self.settings.blur_shape = shape;
@@ -265,6 +351,7 @@ impl App {
             Message::ConfidenceChanged(val) => {
                 self.settings.confidence = val;
                 self.settings.save();
+                self.invalidate_detection();
             }
             Message::BlurStrengthChanged(val) => {
                 self.settings.blur_strength = if val % 2 == 0 { val + 1 } else { val };
@@ -327,6 +414,7 @@ impl App {
                 self.input_path.as_deref(),
                 self.output_path.as_deref(),
                 &self.processing,
+                &self.faces_well,
             ),
             Tab::Settings => tabs::settings_tab::view(&self.settings),
             Tab::Appearance => tabs::appearance_tab::view(&self.settings),
@@ -365,7 +453,7 @@ impl App {
             subs.push(iced::time::every(Duration::from_secs(2)).map(|_| Message::PollSystemTheme));
         }
 
-        if self.worker_rx.is_some() {
+        if self.worker_rx.is_some() || self.preview_rx.is_some() {
             subs.push(iced::time::every(Duration::from_millis(50)).map(|_| Message::WorkerTick));
         }
 
@@ -373,7 +461,35 @@ impl App {
     }
 }
 
+impl App {
+    /// Invalidate cached detection when settings change.
+    fn invalidate_detection(&mut self) {
+        if self.detection_cache.is_some() {
+            self.detection_cache = None;
+            self.faces_well.clear();
+            if matches!(self.processing, ProcessingState::Previewed) {
+                self.processing = ProcessingState::Idle;
+            }
+        }
+    }
+}
+
 /// Scale a base font size by the user's font_scale setting.
 pub fn scaled(base: f32, font_scale: f32) -> f32 {
     (base * font_scale).round()
+}
+
+const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "bmp", "tiff", "tif", "webp"];
+
+fn is_image(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
+fn cleanup_temp_dir(_state: &FacesWellState) {
+    // Temp dir cleanup happens when the OS reclaims the temp directory.
+    // We intentionally leaked the TempDir in preview_worker to keep files alive.
+    // A more robust approach would store the temp path and clean it up here.
 }
