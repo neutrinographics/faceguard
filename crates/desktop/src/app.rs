@@ -1,12 +1,16 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
+use crossbeam_channel::Receiver;
 use iced::widget::{button, column, container, row, scrollable, text};
 use iced::{Element, Length, Subscription, Task, Theme};
 
 use crate::settings::{Appearance, BlurShape, Detector, Settings};
 use crate::tabs;
 use crate::theme;
+use crate::workers::blur_worker::{self, BlurParams, WorkerMessage};
 
 const WEBSITE_URL: &str = "https://www.neutrinographics.com/";
 
@@ -44,6 +48,19 @@ impl Tab {
 }
 
 // ---------------------------------------------------------------------------
+// Processing state
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub enum ProcessingState {
+    Idle,
+    Downloading(u64, u64),
+    Blurring(usize, usize),
+    Complete,
+    Error(String),
+}
+
+// ---------------------------------------------------------------------------
 // Message
 // ---------------------------------------------------------------------------
 
@@ -55,6 +72,9 @@ pub enum Message {
     InputSelected(Option<PathBuf>),
     SelectOutput,
     OutputSelected(Option<PathBuf>),
+    RunBlur,
+    CancelBlur,
+    WorkerTick,
     DetectorChanged(Detector),
     BlurShapeChanged(BlurShape),
     ConfidenceChanged(u32),
@@ -76,6 +96,9 @@ pub struct App {
     pub settings: Settings,
     pub input_path: Option<PathBuf>,
     pub output_path: Option<PathBuf>,
+    pub processing: ProcessingState,
+    worker_rx: Option<Receiver<WorkerMessage>>,
+    worker_cancel: Option<Arc<AtomicBool>>,
 }
 
 impl App {
@@ -86,6 +109,9 @@ impl App {
                 settings: Settings::load(),
                 input_path: None,
                 output_path: None,
+                processing: ProcessingState::Idle,
+                worker_rx: None,
+                worker_cancel: None,
             },
             Task::none(),
         )
@@ -119,7 +145,6 @@ impl App {
                 );
             }
             Message::InputSelected(Some(path)) => {
-                // Auto-generate output path: {stem}_blurred{ext}
                 let stem = path
                     .file_stem()
                     .unwrap_or_default()
@@ -132,6 +157,7 @@ impl App {
                 let output = path.with_file_name(format!("{stem}_blurred{ext}"));
                 self.input_path = Some(path);
                 self.output_path = Some(output);
+                self.processing = ProcessingState::Idle;
             }
             Message::InputSelected(None) => {}
             Message::SelectOutput => {
@@ -169,6 +195,64 @@ impl App {
                 self.output_path = Some(path);
             }
             Message::OutputSelected(None) => {}
+            Message::RunBlur => {
+                if let (Some(input), Some(output)) =
+                    (self.input_path.clone(), self.output_path.clone())
+                {
+                    let params = BlurParams {
+                        input_path: input,
+                        output_path: output,
+                        detector: self.settings.detector,
+                        blur_shape: self.settings.blur_shape,
+                        confidence: self.settings.confidence,
+                        blur_strength: self.settings.blur_strength,
+                        lookahead: self.settings.lookahead,
+                    };
+                    let (rx, cancel) = blur_worker::spawn(params);
+                    self.worker_rx = Some(rx);
+                    self.worker_cancel = Some(cancel);
+                    self.processing = ProcessingState::Downloading(0, 0);
+                }
+            }
+            Message::CancelBlur => {
+                if let Some(ref cancel) = self.worker_cancel {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+            }
+            Message::WorkerTick => {
+                // Collect messages first to avoid borrow conflict
+                let msgs: Vec<_> = self
+                    .worker_rx
+                    .as_ref()
+                    .map(|rx| rx.try_iter().collect())
+                    .unwrap_or_default();
+
+                for msg in msgs {
+                    match msg {
+                        WorkerMessage::DownloadProgress(dl, total) => {
+                            self.processing = ProcessingState::Downloading(dl, total);
+                        }
+                        WorkerMessage::BlurProgress(current, total) => {
+                            self.processing = ProcessingState::Blurring(current, total);
+                        }
+                        WorkerMessage::Complete => {
+                            self.processing = ProcessingState::Complete;
+                            self.worker_rx = None;
+                            self.worker_cancel = None;
+                        }
+                        WorkerMessage::Error(e) => {
+                            self.processing = ProcessingState::Error(e);
+                            self.worker_rx = None;
+                            self.worker_cancel = None;
+                        }
+                        WorkerMessage::Cancelled => {
+                            self.processing = ProcessingState::Idle;
+                            self.worker_rx = None;
+                            self.worker_cancel = None;
+                        }
+                    }
+                }
+            }
             Message::DetectorChanged(detector) => {
                 self.settings.detector = detector;
                 self.settings.save();
@@ -182,7 +266,6 @@ impl App {
                 self.settings.save();
             }
             Message::BlurStrengthChanged(val) => {
-                // Ensure odd
                 self.settings.blur_strength = if val % 2 == 0 { val + 1 } else { val };
                 self.settings.save();
             }
@@ -211,10 +294,7 @@ impl App {
                 self.settings.font_scale = scale;
                 self.settings.save();
             }
-            Message::PollSystemTheme => {
-                // Theme is resolved fresh in theme() on every render,
-                // so just requesting a redraw is enough.
-            }
+            Message::PollSystemTheme => {}
         }
         Task::none()
     }
@@ -241,9 +321,12 @@ impl App {
 
         // Tab content
         let content: Element<'_, Message> = match self.active_tab {
-            Tab::Main => {
-                tabs::main_tab::view(fs, self.input_path.as_deref(), self.output_path.as_deref())
-            }
+            Tab::Main => tabs::main_tab::view(
+                fs,
+                self.input_path.as_deref(),
+                self.output_path.as_deref(),
+                &self.processing,
+            ),
             Tab::Settings => tabs::settings_tab::view(&self.settings),
             Tab::Appearance => tabs::appearance_tab::view(&self.settings),
             Tab::Privacy => tabs::privacy_tab::view(fs),
@@ -275,11 +358,17 @@ impl App {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
+        let mut subs = vec![];
+
         if self.settings.appearance == Appearance::System {
-            iced::time::every(Duration::from_secs(2)).map(|_| Message::PollSystemTheme)
-        } else {
-            Subscription::none()
+            subs.push(iced::time::every(Duration::from_secs(2)).map(|_| Message::PollSystemTheme));
         }
+
+        if self.worker_rx.is_some() {
+            subs.push(iced::time::every(Duration::from_millis(50)).map(|_| Message::WorkerTick));
+        }
+
+        Subscription::batch(subs)
     }
 }
 

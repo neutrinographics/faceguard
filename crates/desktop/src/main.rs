@@ -2,6 +2,7 @@ mod app;
 mod settings;
 mod tabs;
 mod theme;
+mod workers;
 
 use app::App;
 
