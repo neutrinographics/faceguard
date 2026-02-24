@@ -19,6 +19,7 @@ pub struct CpuRectangularBlurrer {
     scale: usize,
     small_k: usize,
     roi_buf: RefCell<Vec<u8>>,
+    blur_temp: RefCell<Vec<f32>>,
 }
 
 impl CpuRectangularBlurrer {
@@ -30,6 +31,7 @@ impl CpuRectangularBlurrer {
             scale,
             small_k,
             roi_buf: RefCell::new(Vec::new()),
+            blur_temp: RefCell::new(Vec::new()),
         }
     }
 }
@@ -72,11 +74,12 @@ impl FrameBlurrer for CpuRectangularBlurrer {
             }
 
             // Blur ROI (with downscale optimization for large kernels)
+            let mut temp = self.blur_temp.borrow_mut();
             if self.scale <= 1 || rh < self.scale * 2 || rw < self.scale * 2 {
-                gaussian::separable_gaussian_blur(&mut roi, rw, rh, channels, self.kernel_size);
+                gaussian::separable_gaussian_blur_with_temp(&mut roi, rw, rh, channels, self.kernel_size, &mut temp);
             } else {
                 let (mut small, sw, sh) = gaussian::downscale(&roi, rw, rh, channels, self.scale);
-                gaussian::separable_gaussian_blur(&mut small, sw, sh, channels, self.small_k);
+                gaussian::separable_gaussian_blur_with_temp(&mut small, sw, sh, channels, self.small_k, &mut temp);
                 let upscaled = gaussian::upscale(&small, sw, sh, channels, rw, rh);
                 roi[..roi_size].copy_from_slice(&upscaled);
             }

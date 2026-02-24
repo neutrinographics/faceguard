@@ -86,7 +86,7 @@ Ellipse SDF computes `(dx/semi_a)^2 + (dy/semi_b)^2` with two divisions per pixe
 
 ---
 
-### 10. Gaussian temp buffer allocated per call
+### 10. ~~Gaussian temp buffer allocated per call~~
 **File**: `crates/core/src/blurring/infrastructure/gaussian.rs:39`
 
 ~960KB `Vec<f64>` temp buffer allocated every blur call (per region per frame).
