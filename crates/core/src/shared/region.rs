@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 /// A blur target region with edge-aware rendering support.
 ///
 /// Stores both clamped (visible) and unclamped (full) dimensions so
@@ -79,6 +81,37 @@ impl Region {
         }
         kept
     }
+
+    /// Filters regions by track ID inclusion/exclusion sets.
+    ///
+    /// **Priority rule:** `blur_ids` takes absolute precedence over `exclude_ids`.
+    /// - If `blur_ids` is Some: keep only regions with `track_id` in the set.
+    /// - Else if `exclude_ids` is Some: keep regions with `track_id` NOT in the set.
+    /// - Else: keep all regions.
+    ///
+    /// Regions with `track_id = None` are excluded when `blur_ids` is set,
+    /// and included when `exclude_ids` is set.
+    pub fn filter(
+        regions: &[Region],
+        blur_ids: Option<&HashSet<u32>>,
+        exclude_ids: Option<&HashSet<u32>>,
+    ) -> Vec<Region> {
+        if let Some(ids) = blur_ids {
+            regions
+                .iter()
+                .filter(|r| r.track_id.is_some_and(|tid| ids.contains(&tid)))
+                .cloned()
+                .collect()
+        } else if let Some(ids) = exclude_ids {
+            regions
+                .iter()
+                .filter(|r| r.track_id.map_or(true, |tid| !ids.contains(&tid)))
+                .cloned()
+                .collect()
+        } else {
+            regions.to_vec()
+        }
+    }
 }
 
 /// Default IoU threshold for deduplication.
@@ -104,7 +137,6 @@ mod tests {
         }
     }
 
-    #[allow(dead_code)]
     fn region_with_track(x: i32, y: i32, w: i32, h: i32, tid: u32) -> Region {
         Region {
             track_id: Some(tid),
@@ -270,5 +302,110 @@ mod tests {
     #[case::zero_height(region(0, 0, 100, 0), region(0, 0, 50, 50), 0.0)]
     fn test_iou_degenerate(#[case] a: Region, #[case] b: Region, #[case] expected: f64) {
         assert_relative_eq!(a.iou(&b), expected);
+    }
+
+    // ── Filter ────────────────────────────────────────────────────────
+
+    fn tracked_region(track_id: Option<u32>) -> Region {
+        Region {
+            x: 10,
+            y: 10,
+            width: 50,
+            height: 50,
+            track_id,
+            full_width: None,
+            full_height: None,
+            unclamped_x: None,
+            unclamped_y: None,
+        }
+    }
+
+    #[test]
+    fn test_filter_no_filters_returns_all() {
+        let regions = vec![tracked_region(Some(1)), tracked_region(Some(2))];
+        let result = Region::filter(&regions, None, None);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_filter_blur_ids_keeps_only_matching() {
+        let regions = vec![
+            tracked_region(Some(1)),
+            tracked_region(Some(2)),
+            tracked_region(Some(3)),
+        ];
+        let blur_ids = HashSet::from([1, 3]);
+        let result = Region::filter(&regions, Some(&blur_ids), None);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].track_id, Some(1));
+        assert_eq!(result[1].track_id, Some(3));
+    }
+
+    #[test]
+    fn test_filter_exclude_ids_removes_matching() {
+        let regions = vec![
+            tracked_region(Some(1)),
+            tracked_region(Some(2)),
+            tracked_region(Some(3)),
+        ];
+        let exclude_ids = HashSet::from([2]);
+        let result = Region::filter(&regions, None, Some(&exclude_ids));
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].track_id, Some(1));
+        assert_eq!(result[1].track_id, Some(3));
+    }
+
+    #[test]
+    fn test_filter_blur_ids_takes_precedence_over_exclude_ids() {
+        let regions = vec![
+            tracked_region(Some(1)),
+            tracked_region(Some(2)),
+            tracked_region(Some(3)),
+        ];
+        let blur_ids = HashSet::from([1]);
+        let exclude_ids = HashSet::from([3]);
+        let result = Region::filter(&regions, Some(&blur_ids), Some(&exclude_ids));
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].track_id, Some(1));
+    }
+
+    #[test]
+    fn test_filter_blur_ids_excludes_none_track_id() {
+        let regions = vec![tracked_region(None), tracked_region(Some(1))];
+        let blur_ids = HashSet::from([1]);
+        let result = Region::filter(&regions, Some(&blur_ids), None);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].track_id, Some(1));
+    }
+
+    #[test]
+    fn test_filter_exclude_ids_includes_none_track_id() {
+        let regions = vec![tracked_region(None), tracked_region(Some(1))];
+        let exclude_ids = HashSet::from([1]);
+        let result = Region::filter(&regions, None, Some(&exclude_ids));
+        assert_eq!(result.len(), 1);
+        assert!(result[0].track_id.is_none());
+    }
+
+    #[test]
+    fn test_filter_empty_regions() {
+        let result = Region::filter(&[], None, None);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_filter_empty_blur_ids_excludes_all() {
+        let regions = vec![tracked_region(Some(1))];
+        let blur_ids = HashSet::new();
+        let result = Region::filter(&regions, Some(&blur_ids), None);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_filter_empty_exclude_ids_keeps_all() {
+        let regions = vec![tracked_region(Some(1)), tracked_region(Some(2))];
+        let exclude_ids = HashSet::new();
+        let result = Region::filter(&regions, None, Some(&exclude_ids));
+        assert_eq!(result.len(), 2);
     }
 }

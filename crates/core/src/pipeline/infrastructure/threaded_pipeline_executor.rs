@@ -6,7 +6,6 @@ use crate::blurring::domain::frame_blurrer::FrameBlurrer;
 use crate::detection::domain::face_detector::FaceDetector;
 use crate::detection::domain::region_merger::RegionMerger;
 use crate::pipeline::pipeline_executor::{PipelineConfig, PipelineExecutor};
-use crate::pipeline::region_filter::filter_regions;
 use crate::shared::frame::Frame;
 use crate::shared::region::Region;
 use crate::shared::video_metadata::VideoMetadata;
@@ -105,7 +104,7 @@ impl PipelineExecutor for ThreadedPipelineExecutor {
                 let result = match frame_result {
                     Ok(frame) => match detector.detect(&frame) {
                         Ok(regions) => {
-                            let filtered = filter_regions(
+                            let filtered = Region::filter(
                                 &regions,
                                 blur_ids.as_ref(),
                                 exclude_ids.as_ref(),
