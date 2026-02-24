@@ -35,6 +35,8 @@ pub struct OnnxYoloDetector {
     tracker: ByteTracker,
     confidence: f64,
     input_size: u32,
+    /// Pre-allocated letterbox tensor reused across frames.
+    letterbox_buf: ndarray::Array4<f32>,
 }
 
 /// Extract the model input resolution from an ONNX session.
@@ -70,12 +72,14 @@ impl OnnxYoloDetector {
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let session = Self::build_session(model_path)?;
         let input_size = session_input_size(&session);
+        let s = input_size as usize;
         Ok(Self {
             session: Arc::new(Mutex::new(session)),
             region_builder,
             tracker,
             confidence,
             input_size,
+            letterbox_buf: ndarray::Array4::<f32>::zeros((1, 3, s, s)),
         })
     }
 
@@ -106,12 +110,14 @@ impl OnnxYoloDetector {
         tracker: ByteTracker,
         confidence: f64,
     ) -> Self {
+        let s = input_size as usize;
         Self {
             session,
             region_builder,
             tracker,
             confidence,
             input_size,
+            letterbox_buf: ndarray::Array4::<f32>::zeros((1, 3, s, s)),
         }
     }
 }
@@ -121,11 +127,11 @@ impl FaceDetector for OnnxYoloDetector {
         let fw = frame.width();
         let fh = frame.height();
 
-        // 1. Preprocess: letterbox + normalize → NCHW float32
-        let (input_tensor, scale, pad_x, pad_y) = letterbox(frame, self.input_size);
+        // 1. Preprocess: letterbox + normalize → NCHW float32 (reuses pre-allocated buffer)
+        let (scale, pad_x, pad_y) = letterbox_into(frame, self.input_size, &mut self.letterbox_buf);
 
         // 2. Inference (lock session, extract tensor data, then release)
-        let input_value = ort::value::Tensor::from_array(input_tensor)?;
+        let input_value = ort::value::TensorRef::from_array_view(self.letterbox_buf.view())?;
         let (data_vec, shape_vec) = {
             let mut session = self
                 .session
@@ -158,31 +164,29 @@ impl FaceDetector for OnnxYoloDetector {
         let data = &data_vec;
         let transposed = shape.len() == 3 && shape[1] < shape[2];
 
-        // 3. Parse detections
+        // 3. Parse detections using zero-allocation indexing
+        let feat = |det_idx: usize, feat_idx: usize| -> f32 {
+            if transposed {
+                data[feat_idx * num_dets + det_idx]
+            } else {
+                data[det_idx * num_feats + feat_idx]
+            }
+        };
+
         let mut raw_dets = Vec::new();
         for i in 0..num_dets {
-            let row = if transposed {
-                // Read column i from transposed layout
-                (0..num_feats)
-                    .map(|f| data[f * num_dets + i])
-                    .collect::<Vec<f32>>()
-            } else {
-                data[i * num_feats..(i + 1) * num_feats].to_vec()
-            };
-
-            // row format: [cx, cy, w, h, conf, kp0_x, kp0_y, kp0_conf, ...]
-            if row.len() < 5 {
+            if num_feats < 5 {
                 continue;
             }
-            let conf = row[4] as f64;
+            let conf = feat(i, 4) as f64;
             if conf < self.confidence {
                 continue;
             }
 
-            let cx = row[0] as f64;
-            let cy = row[1] as f64;
-            let w = row[2] as f64;
-            let h = row[3] as f64;
+            let cx = feat(i, 0) as f64;
+            let cy = feat(i, 1) as f64;
+            let w = feat(i, 2) as f64;
+            let h = feat(i, 3) as f64;
 
             // Convert from letterbox coords back to original frame coords
             let x1 = ((cx - w / 2.0) - pad_x as f64) / scale;
@@ -191,17 +195,15 @@ impl FaceDetector for OnnxYoloDetector {
             let y2 = ((cy + h / 2.0) - pad_y as f64) / scale;
 
             // Parse keypoints if available, filtering by confidence
-            let keypoints = if row.len() >= 5 + NUM_KEYPOINT_VALUES {
+            let keypoints = if num_feats >= 5 + NUM_KEYPOINT_VALUES {
                 let mut pts = [(0.0f64, 0.0f64); 5];
                 for k in 0..5 {
-                    let kconf = row[5 + k * 3 + 2] as f64;
+                    let kconf = feat(i, 5 + k * 3 + 2) as f64;
                     if kconf >= KEYPOINT_CONF_THRESH {
-                        let kx = row[5 + k * 3] as f64;
-                        let ky = row[5 + k * 3 + 1] as f64;
-                        // Map keypoints from letterbox coords to original
+                        let kx = feat(i, 5 + k * 3) as f64;
+                        let ky = feat(i, 5 + k * 3 + 1) as f64;
                         pts[k] = ((kx - pad_x as f64) / scale, (ky - pad_y as f64) / scale);
                     }
-                    // else: pts[k] remains (0.0, 0.0), treated as invisible by FaceLandmarks
                 }
                 Some(pts)
             } else {
@@ -258,10 +260,11 @@ impl FaceDetector for OnnxYoloDetector {
 // Preprocessing
 // ---------------------------------------------------------------------------
 
-/// Letterbox-resize a frame to `target_size` × `target_size`.
+/// Letterbox-resize a frame into a pre-allocated `target_size` × `target_size` tensor.
 ///
-/// Returns `(NCHW float32 tensor, scale, pad_x, pad_y)`.
-fn letterbox(frame: &Frame, target_size: u32) -> (ndarray::Array4<f32>, f64, u32, u32) {
+/// The caller must provide a buffer of shape `[1, 3, target_size, target_size]`.
+/// Returns `(scale, pad_x, pad_y)`.
+fn letterbox_into(frame: &Frame, target_size: u32, buf: &mut ndarray::Array4<f32>) -> (f64, u32, u32) {
     let fw = frame.width() as f64;
     let fh = frame.height() as f64;
     let target = target_size as f64;
@@ -272,10 +275,9 @@ fn letterbox(frame: &Frame, target_size: u32) -> (ndarray::Array4<f32>, f64, u32
     let pad_x = (target_size - new_w) / 2;
     let pad_y = (target_size - new_h) / 2;
 
-    // Build padded image (filled with 114/255 gray, YOLO convention)
+    // Fill entire buffer with 114/255 gray (YOLO convention)
     let gray = 114.0f32 / 255.0;
-    let mut tensor =
-        ndarray::Array4::<f32>::from_elem((1, 3, target_size as usize, target_size as usize), gray);
+    buf.fill(gray);
 
     let src = frame.as_ndarray(); // [H, W, C] u8
     let src_h = frame.height() as usize;
@@ -289,12 +291,23 @@ fn letterbox(frame: &Frame, target_size: u32) -> (ndarray::Array4<f32>, f64, u32
             let ty = pad_y as usize + y;
             let tx = pad_x as usize + x;
             for c in 0..3 {
-                tensor[[0, c, ty, tx]] = src[[src_y, src_x, c]] as f32 / 255.0;
+                buf[[0, c, ty, tx]] = src[[src_y, src_x, c]] as f32 / 255.0;
             }
         }
     }
 
-    (tensor, scale, pad_x, pad_y)
+    (scale, pad_x, pad_y)
+}
+
+/// Letterbox-resize a frame to `target_size` × `target_size` (allocating variant for tests).
+///
+/// Returns `(NCHW float32 tensor, scale, pad_x, pad_y)`.
+#[cfg(test)]
+fn letterbox(frame: &Frame, target_size: u32) -> (ndarray::Array4<f32>, f64, u32, u32) {
+    let s = target_size as usize;
+    let mut buf = ndarray::Array4::<f32>::zeros((1, 3, s, s));
+    let (scale, pad_x, pad_y) = letterbox_into(frame, target_size, &mut buf);
+    (buf, scale, pad_x, pad_y)
 }
 
 // ---------------------------------------------------------------------------

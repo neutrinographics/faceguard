@@ -31,7 +31,7 @@ Pipeline is: `reader_thread -> [detect THEN blur on main thread] -> writer_threa
 
 ## MEDIUM Impact
 
-### 4. Letterbox tensor allocated per frame
+### 4. ~~Letterbox tensor allocated per frame~~
 **File**: `crates/core/src/detection/infrastructure/onnx_yolo_detector.rs:264`
 
 A 4.7MB `Array4<f32>` tensor is heap-allocated for every detection frame. At 30fps with 50% skip, that's ~70MB/s of allocation churn.
@@ -49,7 +49,7 @@ Entire YOLO output tensor (8400 detections x 20 features = ~672KB) is copied to 
 
 ---
 
-### 6. Transposed YOLO creates 8400 tiny Vecs
+### 6. ~~Transposed YOLO creates 8400 tiny Vecs~~
 **File**: `crates/core/src/detection/infrastructure/onnx_yolo_detector.rs:164`
 
 For transposed output layout, each of 8400 detections allocates a `Vec<f32>` just to read 5 values.
