@@ -4,7 +4,9 @@ use std::process;
 
 use clap::Parser;
 
+use video_blur_core::blurring::domain::frame_blurrer::FrameBlurrer;
 use video_blur_core::blurring::infrastructure::blurrer_factory::{create_blurrer, BlurShape};
+use video_blur_core::detection::domain::face_detector::FaceDetector;
 use video_blur_core::detection::domain::face_region_builder::{FaceRegionBuilder, DEFAULT_PADDING};
 use video_blur_core::detection::domain::region_merger::RegionMerger;
 use video_blur_core::detection::domain::region_smoother::{RegionSmoother, DEFAULT_ALPHA};
@@ -12,21 +14,20 @@ use video_blur_core::detection::infrastructure::bytetrack_tracker::ByteTracker;
 use video_blur_core::detection::infrastructure::model_resolver;
 use video_blur_core::detection::infrastructure::onnx_yolo_detector::OnnxYoloDetector;
 use video_blur_core::detection::infrastructure::skip_frame_detector::SkipFrameDetector;
-use video_blur_core::shared::constants::{
-    IMAGE_EXTENSIONS, TRACKER_MAX_LOST, YOLO_MODEL_NAME, YOLO_MODEL_URL,
-};
 use video_blur_core::pipeline::blur_faces_use_case::BlurFacesUseCase;
 use video_blur_core::pipeline::blur_image_use_case::BlurImageUseCase;
 use video_blur_core::pipeline::infrastructure::threaded_pipeline_executor::ThreadedPipelineExecutor;
 use video_blur_core::pipeline::preview_faces_use_case::PreviewFacesUseCase;
+use video_blur_core::shared::constants::{
+    IMAGE_EXTENSIONS, TRACKER_MAX_LOST, YOLO_MODEL_NAME, YOLO_MODEL_URL,
+};
+use video_blur_core::video::domain::image_writer::ImageWriter;
+use video_blur_core::video::domain::video_reader::VideoReader;
+use video_blur_core::video::domain::video_writer::VideoWriter;
 use video_blur_core::video::infrastructure::ffmpeg_reader::FfmpegReader;
 use video_blur_core::video::infrastructure::ffmpeg_writer::FfmpegWriter;
 use video_blur_core::video::infrastructure::image_file_reader::ImageFileReader;
 use video_blur_core::video::infrastructure::image_file_writer::ImageFileWriter;
-
-// ---------------------------------------------------------------------------
-// CLI definition
-// ---------------------------------------------------------------------------
 
 /// Face detection and blurring for videos and images.
 #[derive(Parser)]
@@ -71,20 +72,170 @@ struct Cli {
     exclude_ids: Option<Vec<u32>>,
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+fn main() {
+    env_logger::init();
 
-fn is_image(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
-        .unwrap_or(false)
+    if let Err(e) = run() {
+        eprintln!("Error: {e}");
+        process::exit(1);
+    }
 }
 
-fn validate(cli: &Cli) -> Result<(), String> {
+fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let cli = Cli::parse();
+    validate(&cli)?;
+
+    let detector = build_detector(&cli)?;
+    let blurrer = create_blurrer(parse_blur_shape(&cli.blur_shape), cli.blur_strength);
+    let input = cli.input;
+    let output = cli.output;
+    let lookahead = cli.lookahead;
+    let blur_ids = to_id_set(cli.blur_ids);
+    let exclude_ids = to_id_set(cli.exclude_ids);
+
+    if let Some(preview_dir) = cli.preview {
+        run_preview(&input, &preview_dir, detector)?;
+    } else if is_image(&input) {
+        run_image_blur(
+            &input,
+            output.as_ref().unwrap(),
+            detector,
+            blurrer,
+            blur_ids,
+            exclude_ids,
+        )?;
+    } else {
+        run_video_blur(
+            &input,
+            output.as_ref().unwrap(),
+            lookahead,
+            detector,
+            blurrer,
+            blur_ids,
+            exclude_ids,
+        )?;
+    }
+
+    Ok(())
+}
+
+fn run_preview(
+    input: &Path,
+    preview_dir: &Path,
+    detector: Box<dyn FaceDetector>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut reader = open_reader(input);
+    let metadata = reader.open(input)?;
+    let image_writer: Box<dyn ImageWriter> = Box::new(ImageFileWriter::new());
+
+    let progress: Box<dyn Fn(usize, usize) -> bool + Send> = Box::new(|current, total| {
+        eprint!("\rScanning frame {current}/{total}");
+        true
+    });
+
+    let mut use_case = PreviewFacesUseCase::new(reader, detector, image_writer, Some(progress));
+    let (crops, _cache) = use_case.execute(&metadata, preview_dir)?;
+    eprintln!();
+    log::info!(
+        "Saved {} face crops to {}",
+        crops.len(),
+        preview_dir.display()
+    );
+    Ok(())
+}
+
+fn run_image_blur(
+    input: &Path,
+    output: &Path,
+    detector: Box<dyn FaceDetector>,
+    blurrer: Box<dyn FrameBlurrer>,
+    blur_ids: Option<HashSet<u32>>,
+    exclude_ids: Option<HashSet<u32>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let reader: Box<dyn VideoReader> = Box::new(ImageFileReader::new());
+    let image_writer: Box<dyn ImageWriter> = Box::new(ImageFileWriter::new());
+
+    let mut use_case = BlurImageUseCase::new(
+        reader,
+        image_writer,
+        detector,
+        blurrer,
+        blur_ids,
+        exclude_ids,
+    );
+    use_case.execute(input, output)?;
+    log::info!("Output written to {}", output.display());
+    Ok(())
+}
+
+fn run_video_blur(
+    input: &Path,
+    output: &Path,
+    lookahead: usize,
+    detector: Box<dyn FaceDetector>,
+    blurrer: Box<dyn FrameBlurrer>,
+    blur_ids: Option<HashSet<u32>>,
+    exclude_ids: Option<HashSet<u32>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut reader: Box<dyn VideoReader> = Box::new(FfmpegReader::new());
+    let metadata = reader.open(input)?;
+    let writer: Box<dyn VideoWriter> = Box::new(FfmpegWriter::new());
+
+    let total = metadata.total_frames;
+    let progress: Box<dyn Fn(usize, usize) -> bool + Send> = Box::new(move |current, _| {
+        eprint!("\rProcessing frame {current}/{total}");
+        true
+    });
+
+    let mut use_case = BlurFacesUseCase::new(
+        reader,
+        writer,
+        detector,
+        blurrer,
+        RegionMerger::new(),
+        Box::new(ThreadedPipelineExecutor::new()),
+        Some(lookahead),
+        blur_ids,
+        exclude_ids,
+        Some(progress),
+        None,
+    );
+    use_case.execute(&metadata, output)?;
+    eprintln!();
+    log::info!("Output written to {}", output.display());
+    Ok(())
+}
+
+fn build_detector(cli: &Cli) -> Result<Box<dyn FaceDetector>, Box<dyn std::error::Error>> {
+    log::info!("Resolving model: {YOLO_MODEL_NAME}");
+    let model_path = model_resolver::resolve(
+        YOLO_MODEL_NAME,
+        YOLO_MODEL_URL,
+        None,
+        Some(Box::new(download_progress)),
+    )?;
+    eprintln!();
+
+    let smoother = RegionSmoother::new(DEFAULT_ALPHA);
+    let region_builder = FaceRegionBuilder::new(DEFAULT_PADDING, Some(Box::new(smoother)));
+    let tracker = ByteTracker::new(TRACKER_MAX_LOST);
+    let base: Box<dyn FaceDetector> = Box::new(OnnxYoloDetector::new(
+        &model_path,
+        region_builder,
+        tracker,
+        cli.confidence,
+    )?);
+
+    if cli.skip_frames > 1 {
+        Ok(Box::new(SkipFrameDetector::new(base, cli.skip_frames)?))
+    } else {
+        Ok(base)
+    }
+}
+
+fn validate(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
     if !cli.input.exists() {
-        return Err(format!("Input file not found: {}", cli.input.display()));
+        return Err(format!("Input file not found: {}", cli.input.display()).into());
     }
     if cli.blur_ids.is_some() && cli.exclude_ids.is_some() {
         return Err("--blur-ids and --exclude-ids are mutually exclusive".into());
@@ -96,21 +247,51 @@ fn validate(cli: &Cli) -> Result<(), String> {
         return Err(format!(
             "Blur strength must be a positive odd integer, got {}",
             cli.blur_strength
-        ));
+        )
+        .into());
     }
     if !(0.0..=1.0).contains(&cli.confidence) {
         return Err(format!(
             "Confidence must be between 0.0 and 1.0, got {}",
             cli.confidence
-        ));
+        )
+        .into());
     }
     if cli.blur_shape != "ellipse" && cli.blur_shape != "rect" {
         return Err(format!(
             "Blur shape must be 'ellipse' or 'rect', got '{}'",
             cli.blur_shape
-        ));
+        )
+        .into());
     }
     Ok(())
+}
+
+fn is_image(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
+fn open_reader(input: &Path) -> Box<dyn VideoReader> {
+    if is_image(input) {
+        Box::new(ImageFileReader::new())
+    } else {
+        Box::new(FfmpegReader::new())
+    }
+}
+
+fn parse_blur_shape(shape: &str) -> BlurShape {
+    if shape == "rect" {
+        BlurShape::Rectangular
+    } else {
+        BlurShape::Elliptical
+    }
+}
+
+fn to_id_set(ids: Option<Vec<u32>>) -> Option<HashSet<u32>> {
+    ids.map(|v| v.into_iter().collect())
 }
 
 fn download_progress(downloaded: u64, total: u64) {
@@ -119,142 +300,5 @@ fn download_progress(downloaded: u64, total: u64) {
         eprint!("\rDownloading model... {pct}%");
     } else {
         eprint!("\rDownloading model... {downloaded} bytes");
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
-
-fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let cli = Cli::parse();
-    validate(&cli).map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
-
-    let input = &cli.input;
-    let image_mode = is_image(input);
-
-    // Resolve model
-    log::info!("Resolving model: {YOLO_MODEL_NAME}");
-    let model_path = model_resolver::resolve(
-        YOLO_MODEL_NAME,
-        YOLO_MODEL_URL,
-        None,
-        Some(Box::new(download_progress)),
-    )?;
-    eprintln!(); // newline after download progress
-
-    // Build detector
-    let smoother = RegionSmoother::new(DEFAULT_ALPHA);
-    let region_builder = FaceRegionBuilder::new(DEFAULT_PADDING, Some(Box::new(smoother)));
-    let tracker = ByteTracker::new(TRACKER_MAX_LOST);
-    let detector: Box<dyn video_blur_core::detection::domain::face_detector::FaceDetector> =
-        Box::new(OnnxYoloDetector::new(&model_path, region_builder, tracker, cli.confidence)?);
-
-    // Wrap in skip-frame decorator if needed
-    let detector: Box<dyn video_blur_core::detection::domain::face_detector::FaceDetector> =
-        if cli.skip_frames > 1 {
-            Box::new(SkipFrameDetector::new(detector, cli.skip_frames)?)
-        } else {
-            detector
-        };
-
-    // Build blurrer
-    let blur_shape = if cli.blur_shape == "rect" {
-        BlurShape::Rectangular
-    } else {
-        BlurShape::Elliptical
-    };
-    let blurrer = create_blurrer(blur_shape, cli.blur_strength);
-
-    // Parse ID filters
-    let blur_ids: Option<HashSet<u32>> = cli.blur_ids.map(|ids| ids.into_iter().collect());
-    let exclude_ids: Option<HashSet<u32>> = cli.exclude_ids.map(|ids| ids.into_iter().collect());
-
-    // Branch: preview / image / video
-    if let Some(ref preview_dir) = cli.preview {
-        // Preview mode
-        let mut reader: Box<dyn video_blur_core::video::domain::video_reader::VideoReader> =
-            if image_mode {
-                Box::new(ImageFileReader::new())
-            } else {
-                Box::new(FfmpegReader::new())
-            };
-        let metadata = reader.open(input)?;
-        let image_writer = Box::new(ImageFileWriter::new());
-
-        let progress: Box<dyn Fn(usize, usize) -> bool + Send> = Box::new(|current, total| {
-            eprint!("\rScanning frame {current}/{total}");
-            true
-        });
-
-        let mut use_case = PreviewFacesUseCase::new(reader, detector, image_writer, Some(progress));
-        let (crops, _cache) = use_case.execute(&metadata, preview_dir)?;
-        eprintln!();
-        log::info!(
-            "Saved {} face crops to {}",
-            crops.len(),
-            preview_dir.display()
-        );
-    } else if image_mode {
-        // Image mode
-        let reader: Box<dyn video_blur_core::video::domain::video_reader::VideoReader> =
-            Box::new(ImageFileReader::new());
-        let image_writer: Box<dyn video_blur_core::video::domain::image_writer::ImageWriter> =
-            Box::new(ImageFileWriter::new());
-        let output = cli.output.as_ref().unwrap();
-
-        let mut use_case = BlurImageUseCase::new(
-            reader,
-            image_writer,
-            detector,
-            blurrer,
-            blur_ids,
-            exclude_ids,
-        );
-        use_case.execute(input, output)?;
-        log::info!("Output written to {}", output.display());
-    } else {
-        // Video mode
-        let mut reader: Box<dyn video_blur_core::video::domain::video_reader::VideoReader> =
-            Box::new(FfmpegReader::new());
-        let metadata = reader.open(input)?;
-        let writer: Box<dyn video_blur_core::video::domain::video_writer::VideoWriter> =
-            Box::new(FfmpegWriter::new());
-        let merger = RegionMerger::new();
-        let output = cli.output.as_ref().unwrap();
-
-        let total = metadata.total_frames;
-        let progress: Box<dyn Fn(usize, usize) -> bool + Send> = Box::new(move |current, _| {
-            eprint!("\rProcessing frame {current}/{total}");
-            true
-        });
-
-        let mut use_case = BlurFacesUseCase::new(
-            reader,
-            writer,
-            detector,
-            blurrer,
-            merger,
-            Box::new(ThreadedPipelineExecutor::new()),
-            Some(cli.lookahead),
-            blur_ids,
-            exclude_ids,
-            Some(progress),
-            None,
-        );
-        use_case.execute(&metadata, output)?;
-        eprintln!();
-        log::info!("Output written to {}", output.display());
-    }
-
-    Ok(())
-}
-
-fn main() {
-    env_logger::init();
-
-    if let Err(e) = run() {
-        eprintln!("Error: {e}");
-        process::exit(1);
     }
 }
