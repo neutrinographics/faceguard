@@ -42,9 +42,7 @@ pub fn create_blurrer_with_context(
         );
         match shape {
             BlurShape::Elliptical => Box::new(GpuEllipticalBlurrer::new(ctx, kernel_size as u32)),
-            BlurShape::Rectangular => {
-                Box::new(GpuRectangularBlurrer::new(ctx, kernel_size as u32))
-            }
+            BlurShape::Rectangular => Box::new(GpuRectangularBlurrer::new(ctx, kernel_size as u32)),
         }
     } else {
         log::info!(

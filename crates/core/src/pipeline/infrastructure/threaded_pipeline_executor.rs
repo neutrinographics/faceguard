@@ -104,11 +104,8 @@ impl PipelineExecutor for ThreadedPipelineExecutor {
                 let result = match frame_result {
                     Ok(frame) => match detector.detect(&frame) {
                         Ok(regions) => {
-                            let filtered = Region::filter(
-                                &regions,
-                                blur_ids.as_ref(),
-                                exclude_ids.as_ref(),
-                            );
+                            let filtered =
+                                Region::filter(&regions, blur_ids.as_ref(), exclude_ids.as_ref());
                             Ok((frame, filtered))
                         }
                         Err(e) => Err(e.to_string().into()),
@@ -259,8 +256,10 @@ fn flush_oldest(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (mut frame, own_regions) = buffer.pop_front().unwrap();
 
-    let lookahead_regions: Vec<&[Region]> =
-        buffer.iter().map(|(_, regions)| regions.as_slice()).collect();
+    let lookahead_regions: Vec<&[Region]> = buffer
+        .iter()
+        .map(|(_, regions)| regions.as_slice())
+        .collect();
 
     let merged = merger.merge(&own_regions, &lookahead_regions, frame_w, frame_h);
     blurrer.blur(&mut frame, &merged)?;

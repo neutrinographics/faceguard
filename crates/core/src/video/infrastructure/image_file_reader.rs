@@ -46,8 +46,7 @@ impl VideoReader for ImageFileReader {
             .best(ffmpeg_next::media::Type::Video)
             .ok_or("No image data found")?;
 
-        let codec_ctx =
-            ffmpeg_next::codec::context::Context::from_parameters(stream.parameters())?;
+        let codec_ctx = ffmpeg_next::codec::context::Context::from_parameters(stream.parameters())?;
         let mut decoder = codec_ctx.decoder().video()?;
 
         let width = decoder.width();

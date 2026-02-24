@@ -104,7 +104,6 @@ impl PreviewFacesUseCase {
 
         Ok((result, detection_cache))
     }
-
 }
 
 /// Extracts a square crop centered on the region, clamped to frame bounds.

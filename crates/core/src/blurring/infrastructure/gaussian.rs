@@ -20,11 +20,7 @@ pub fn gaussian_kernel_1d(kernel_size: usize) -> Vec<f32> {
     kernel_f64.iter().map(|&v| v as f32).collect()
 }
 
-/// Apply a separable Gaussian blur to an RGB image stored as `[height][width][3]`.
-///
-/// The image is modified in-place. `kernel_size` must be odd.
-/// Convenience wrapper that allocates its own temp buffer; prefer
-/// [`separable_gaussian_blur_with_temp`] in hot paths.
+/// Convenience wrapper that allocates its own temp buffer.
 #[cfg(test)]
 pub fn separable_gaussian_blur(
     data: &mut [u8],
@@ -33,26 +29,12 @@ pub fn separable_gaussian_blur(
     channels: usize,
     kernel_size: usize,
 ) {
-    let mut temp = Vec::new();
-    separable_gaussian_blur_with_temp(data, width, height, channels, kernel_size, &mut temp);
-}
-
-/// Apply a separable Gaussian blur, reusing `temp` as the intermediate buffer.
-///
-/// The caller should keep `temp` alive across calls to avoid reallocations.
-pub fn separable_gaussian_blur_with_temp(
-    data: &mut [u8],
-    width: usize,
-    height: usize,
-    channels: usize,
-    kernel_size: usize,
-    temp: &mut Vec<f32>,
-) {
     if kernel_size <= 1 || width == 0 || height == 0 {
         return;
     }
     let kernel = gaussian_kernel_1d(kernel_size);
-    separable_gaussian_blur_with_kernel(data, width, height, channels, &kernel, temp);
+    let mut temp = Vec::new();
+    separable_gaussian_blur_with_kernel(data, width, height, channels, &kernel, &mut temp);
 }
 
 /// Apply a separable Gaussian blur using a pre-computed kernel, reusing `temp`.

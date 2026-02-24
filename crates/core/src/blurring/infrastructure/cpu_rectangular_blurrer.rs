@@ -15,10 +15,8 @@ const DEFAULT_KERNEL_SIZE: usize = 201;
 /// downscale-blur-upscale optimization as the Python implementation
 /// for large kernel sizes.
 pub struct CpuRectangularBlurrer {
-    kernel_size: usize,
     kernel: Vec<f32>,
     scale: usize,
-    small_k: usize,
     small_kernel: Vec<f32>,
     roi_buf: RefCell<Vec<u8>>,
     blur_temp: RefCell<Vec<f32>>,
@@ -29,10 +27,8 @@ impl CpuRectangularBlurrer {
         let scale = (kernel_size / 50).max(1);
         let small_k = (kernel_size / scale) | 1; // ensure odd
         Self {
-            kernel_size,
             kernel: gaussian::gaussian_kernel_1d(kernel_size),
             scale,
-            small_k,
             small_kernel: gaussian::gaussian_kernel_1d(small_k),
             roi_buf: RefCell::new(Vec::new()),
             blur_temp: RefCell::new(Vec::new()),
@@ -80,10 +76,24 @@ impl FrameBlurrer for CpuRectangularBlurrer {
             // Blur ROI (with downscale optimization for large kernels)
             let mut temp = self.blur_temp.borrow_mut();
             if self.scale <= 1 || rh < self.scale * 2 || rw < self.scale * 2 {
-                gaussian::separable_gaussian_blur_with_kernel(&mut roi, rw, rh, channels, &self.kernel, &mut temp);
+                gaussian::separable_gaussian_blur_with_kernel(
+                    &mut roi,
+                    rw,
+                    rh,
+                    channels,
+                    &self.kernel,
+                    &mut temp,
+                );
             } else {
                 let (mut small, sw, sh) = gaussian::downscale(&roi, rw, rh, channels, self.scale);
-                gaussian::separable_gaussian_blur_with_kernel(&mut small, sw, sh, channels, &self.small_kernel, &mut temp);
+                gaussian::separable_gaussian_blur_with_kernel(
+                    &mut small,
+                    sw,
+                    sh,
+                    channels,
+                    &self.small_kernel,
+                    &mut temp,
+                );
                 let upscaled = gaussian::upscale(&small, sw, sh, channels, rw, rh);
                 roi[..roi_size].copy_from_slice(&upscaled);
             }
@@ -236,14 +246,14 @@ mod tests {
     #[test]
     fn test_default_kernel_size() {
         let blurrer = CpuRectangularBlurrer::default();
-        assert_eq!(blurrer.kernel_size, DEFAULT_KERNEL_SIZE);
+        assert_eq!(blurrer.kernel.len(), DEFAULT_KERNEL_SIZE);
     }
 
     #[test]
     fn test_downscale_optimization_used_for_large_kernel() {
         let blurrer = CpuRectangularBlurrer::new(201);
         assert!(blurrer.scale > 1);
-        assert!(blurrer.small_k < blurrer.kernel_size);
-        assert_eq!(blurrer.small_k % 2, 1); // must be odd
+        assert!(blurrer.small_kernel.len() < blurrer.kernel.len());
+        assert_eq!(blurrer.small_kernel.len() % 2, 1); // must be odd
     }
 }

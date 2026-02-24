@@ -137,13 +137,6 @@ mod tests {
         }
     }
 
-    fn region_with_track(x: i32, y: i32, w: i32, h: i32, tid: u32) -> Region {
-        Region {
-            track_id: Some(tid),
-            ..region(x, y, w, h)
-        }
-    }
-
     #[allow(clippy::too_many_arguments)]
     fn region_with_unclamped(
         x: i32,

@@ -15,10 +15,8 @@ const DEFAULT_KERNEL_SIZE: usize = 201;
 /// back into the frame. Uses the Region's edge-aware ellipse geometry so
 /// the blur extends smoothly off frame edges.
 pub struct CpuEllipticalBlurrer {
-    kernel_size: usize,
     kernel: Vec<f32>,
     scale: usize,
-    small_k: usize,
     small_kernel: Vec<f32>,
     roi_buf: RefCell<Vec<u8>>,
     blur_temp: RefCell<Vec<f32>>,
@@ -29,10 +27,8 @@ impl CpuEllipticalBlurrer {
         let scale = (kernel_size / 50).max(1);
         let small_k = (kernel_size / scale) | 1; // ensure odd
         Self {
-            kernel_size,
             kernel: gaussian::gaussian_kernel_1d(kernel_size),
             scale,
-            small_k,
             small_kernel: gaussian::gaussian_kernel_1d(small_k),
             roi_buf: RefCell::new(Vec::new()),
             blur_temp: RefCell::new(Vec::new()),
@@ -80,10 +76,24 @@ impl FrameBlurrer for CpuEllipticalBlurrer {
             // Blur ROI (with downscale optimization for large kernels)
             let mut temp = self.blur_temp.borrow_mut();
             if self.scale <= 1 || rh < self.scale * 2 || rw < self.scale * 2 {
-                gaussian::separable_gaussian_blur_with_kernel(&mut roi, rw, rh, channels, &self.kernel, &mut temp);
+                gaussian::separable_gaussian_blur_with_kernel(
+                    &mut roi,
+                    rw,
+                    rh,
+                    channels,
+                    &self.kernel,
+                    &mut temp,
+                );
             } else {
                 let (mut small, sw, sh) = gaussian::downscale(&roi, rw, rh, channels, self.scale);
-                gaussian::separable_gaussian_blur_with_kernel(&mut small, sw, sh, channels, &self.small_kernel, &mut temp);
+                gaussian::separable_gaussian_blur_with_kernel(
+                    &mut small,
+                    sw,
+                    sh,
+                    channels,
+                    &self.small_kernel,
+                    &mut temp,
+                );
                 let upscaled = gaussian::upscale(&small, sw, sh, channels, rw, rh);
                 roi[..roi_size].copy_from_slice(&upscaled);
             }
@@ -91,8 +101,16 @@ impl FrameBlurrer for CpuEllipticalBlurrer {
             // Get ellipse geometry from region
             let (ecx, ecy) = r.ellipse_center_in_roi();
             let (semi_a, semi_b) = r.ellipse_axes();
-            let inv_a_sq = if semi_a > 0.0 { 1.0 / (semi_a * semi_a) } else { 0.0 };
-            let inv_b_sq = if semi_b > 0.0 { 1.0 / (semi_b * semi_b) } else { 0.0 };
+            let inv_a_sq = if semi_a > 0.0 {
+                1.0 / (semi_a * semi_a)
+            } else {
+                0.0
+            };
+            let inv_b_sq = if semi_b > 0.0 {
+                1.0 / (semi_b * semi_b)
+            } else {
+                0.0
+            };
             let ellipse_valid = semi_a > 0.0 && semi_b > 0.0;
 
             // Composite blurred pixels within ellipse mask back into frame
@@ -295,6 +313,6 @@ mod tests {
     #[test]
     fn test_default_kernel_size() {
         let blurrer = CpuEllipticalBlurrer::default();
-        assert_eq!(blurrer.kernel_size, DEFAULT_KERNEL_SIZE);
+        assert_eq!(blurrer.kernel.len(), DEFAULT_KERNEL_SIZE);
     }
 }

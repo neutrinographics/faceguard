@@ -84,8 +84,16 @@ impl BlurFacesUseCase {
         let blurrer = std::mem::replace(&mut self.blurrer, Box::new(NullBlurrer));
         let merger = std::mem::take(&mut self.merger);
 
-        self.executor
-            .execute(reader, writer, detector, blurrer, merger, metadata, output_path, config)
+        self.executor.execute(
+            reader,
+            writer,
+            detector,
+            blurrer,
+            merger,
+            metadata,
+            output_path,
+            config,
+        )
     }
 }
 
@@ -94,17 +102,15 @@ impl BlurFacesUseCase {
 struct NullReader;
 
 impl VideoReader for NullReader {
-    fn open(
-        &mut self,
-        _path: &Path,
-    ) -> Result<VideoMetadata, Box<dyn std::error::Error>> {
+    fn open(&mut self, _path: &Path) -> Result<VideoMetadata, Box<dyn std::error::Error>> {
         Err("NullReader".into())
     }
 
     fn frames(
         &mut self,
-    ) -> Box<dyn Iterator<Item = Result<crate::shared::frame::Frame, Box<dyn std::error::Error>>> + '_>
-    {
+    ) -> Box<
+        dyn Iterator<Item = Result<crate::shared::frame::Frame, Box<dyn std::error::Error>>> + '_,
+    > {
         Box::new(std::iter::empty())
     }
 

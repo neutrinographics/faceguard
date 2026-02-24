@@ -197,12 +197,12 @@ impl FaceDetector for OnnxYoloDetector {
                 // Parse keypoints if available, filtering by confidence
                 let keypoints = if num_feats >= 5 + NUM_KEYPOINT_VALUES {
                     let mut pts = [(0.0f64, 0.0f64); 5];
-                    for k in 0..5 {
+                    for (k, pt) in pts.iter_mut().enumerate() {
                         let kconf = feat(i, 5 + k * 3 + 2) as f64;
                         if kconf >= KEYPOINT_CONF_THRESH {
                             let kx = feat(i, 5 + k * 3) as f64;
                             let ky = feat(i, 5 + k * 3 + 1) as f64;
-                            pts[k] = ((kx - pad_x as f64) / scale, (ky - pad_y as f64) / scale);
+                            *pt = ((kx - pad_x as f64) / scale, (ky - pad_y as f64) / scale);
                         }
                     }
                     Some(pts)
@@ -265,7 +265,11 @@ impl FaceDetector for OnnxYoloDetector {
 ///
 /// The caller must provide a buffer of shape `[1, 3, target_size, target_size]`.
 /// Returns `(scale, pad_x, pad_y)`.
-fn letterbox_into(frame: &Frame, target_size: u32, buf: &mut ndarray::Array4<f32>) -> (f64, u32, u32) {
+fn letterbox_into(
+    frame: &Frame,
+    target_size: u32,
+    buf: &mut ndarray::Array4<f32>,
+) -> (f64, u32, u32) {
     let fw = frame.width() as f64;
     let fh = frame.height() as f64;
     let target = target_size as f64;

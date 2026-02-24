@@ -115,8 +115,8 @@ impl VideoWriter for FfmpegWriter {
                     let audio_tb = audio_stream.time_base();
                     let audio_params = audio_stream.parameters();
 
-                    let mut audio_ost = octx
-                        .add_stream(ffmpeg_next::encoder::find(ffmpeg_next::codec::Id::None))?;
+                    let mut audio_ost =
+                        octx.add_stream(ffmpeg_next::encoder::find(ffmpeg_next::codec::Id::None))?;
                     audio_ost.set_parameters(audio_params);
                     unsafe {
                         (*audio_ost.parameters().as_mut_ptr()).codec_tag = 0;
@@ -222,7 +222,12 @@ impl VideoWriter for FfmpegWriter {
             }
 
             // Copy audio packets from source before writing trailer
-            if let (Some(audio_src_idx), Some(audio_ost_idx), Some(audio_src_tb), Some(ref source_path)) = (
+            if let (
+                Some(audio_src_idx),
+                Some(audio_ost_idx),
+                Some(audio_src_tb),
+                Some(ref source_path),
+            ) = (
                 self.audio_source_stream_idx,
                 self.audio_output_stream_idx,
                 self.audio_source_time_base,

@@ -122,10 +122,12 @@ fn download_inner(
     let mut reader = response;
     let mut buf = vec![0u8; 1024 * 1024]; // 1MB buffer
     loop {
-        let n = reader.read(&mut buf).map_err(|e| ModelResolveError::Write {
-            path: temp_path.to_path_buf(),
-            source: e,
-        })?;
+        let n = reader
+            .read(&mut buf)
+            .map_err(|e| ModelResolveError::Write {
+                path: temp_path.to_path_buf(),
+                source: e,
+            })?;
         if n == 0 {
             break;
         }
