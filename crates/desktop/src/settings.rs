@@ -4,26 +4,6 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum Detector {
-    Yolo,
-    Mediapipe,
-}
-
-impl Detector {
-    pub const ALL: &[Detector] = &[Detector::Yolo, Detector::Mediapipe];
-}
-
-impl std::fmt::Display for Detector {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Detector::Yolo => write!(f, "YOLO"),
-            Detector::Mediapipe => write!(f, "MediaPipe"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
 pub enum BlurShape {
     Ellipse,
     Rect,
@@ -66,7 +46,6 @@ impl std::fmt::Display for Appearance {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
-    pub detector: Detector,
     pub blur_shape: BlurShape,
     pub confidence: u32,
     pub blur_strength: u32,
@@ -79,7 +58,6 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            detector: Detector::Yolo,
             blur_shape: BlurShape::Ellipse,
             confidence: 50,
             blur_strength: 201,

@@ -12,7 +12,6 @@ use video_blur_core::detection::domain::region_smoother::{RegionSmoother, DEFAUL
 use video_blur_core::detection::infrastructure::bytetrack_tracker::ByteTracker;
 use video_blur_core::detection::infrastructure::histogram_face_grouper::HistogramFaceGrouper;
 use video_blur_core::detection::infrastructure::model_resolver;
-use video_blur_core::detection::infrastructure::onnx_blazeface_detector::OnnxBlazefaceDetector;
 use video_blur_core::detection::infrastructure::onnx_yolo_detector::OnnxYoloDetector;
 use video_blur_core::detection::infrastructure::skip_frame_detector::SkipFrameDetector;
 use video_blur_core::pipeline::preview_faces_use_case::PreviewFacesUseCase;
@@ -27,13 +26,9 @@ const YOLO_MODEL_NAME: &str = "yolo11n-pose_widerface.onnx";
 const YOLO_MODEL_URL: &str =
     "https://github.com/da1nerd/video-blur/releases/download/v0.1.0/yolo11n-pose_widerface.onnx";
 
-const BLAZEFACE_MODEL_NAME: &str = "blaze_face_short_range.onnx";
-const BLAZEFACE_MODEL_URL: &str =
-    "https://github.com/da1nerd/video-blur/releases/download/models-v1/blaze_face_short_range.onnx";
-
 const EMBEDDING_MODEL_NAME: &str = "w600k_r50.onnx";
 const EMBEDDING_MODEL_URL: &str =
-    "https://huggingface.co/public-data/insightface/resolve/main/models/buffalo_l/w600k_r50.onnx";
+    "https://github.com/da1nerd/video-blur/releases/download/v0.1.0/w600k_r50.onnx";
 
 const TRACKER_MAX_LOST: usize = 30;
 
@@ -65,7 +60,6 @@ pub struct PreviewResult {
 #[derive(Clone)]
 pub struct PreviewParams {
     pub input_path: PathBuf,
-    pub detector: crate::settings::Detector,
     pub confidence: u32,
 }
 
@@ -97,15 +91,10 @@ fn run_preview(
     let confidence = params.confidence as f64 / 100.0;
 
     // Resolve detector model
-    let (model_name, model_url) = match params.detector {
-        crate::settings::Detector::Mediapipe => (BLAZEFACE_MODEL_NAME, BLAZEFACE_MODEL_URL),
-        crate::settings::Detector::Yolo => (YOLO_MODEL_NAME, YOLO_MODEL_URL),
-    };
-
     let tx_dl = tx.clone();
     let model_path = model_resolver::resolve(
-        model_name,
-        model_url,
+        YOLO_MODEL_NAME,
+        YOLO_MODEL_URL,
         None,
         Some(Box::new(move |downloaded, total| {
             let _ = tx_dl.send(PreviewMessage::DownloadProgress(downloaded, total));
@@ -132,21 +121,12 @@ fn run_preview(
     }
 
     // Build detector
+    let smoother = RegionSmoother::new(DEFAULT_ALPHA);
+    let region_builder = FaceRegionBuilder::new(DEFAULT_PADDING, Some(Box::new(smoother)));
+    let tracker = ByteTracker::new(TRACKER_MAX_LOST);
+    let det = OnnxYoloDetector::new(&model_path, region_builder, tracker, confidence)?;
     let detector: Box<dyn video_blur_core::detection::domain::face_detector::FaceDetector> =
-        match params.detector {
-            crate::settings::Detector::Mediapipe => {
-                let det = OnnxBlazefaceDetector::new(&model_path, confidence, 30.0)?;
-                Box::new(det)
-            }
-            crate::settings::Detector::Yolo => {
-                let smoother = RegionSmoother::new(DEFAULT_ALPHA);
-                let region_builder =
-                    FaceRegionBuilder::new(DEFAULT_PADDING, Some(Box::new(smoother)));
-                let tracker = ByteTracker::new(TRACKER_MAX_LOST);
-                let det = OnnxYoloDetector::new(&model_path, region_builder, tracker, confidence)?;
-                Box::new(SkipFrameDetector::new(Box::new(det), 2)?)
-            }
-        };
+        Box::new(SkipFrameDetector::new(Box::new(det), 2)?);
 
     // Open reader (image or video)
     let is_image = input

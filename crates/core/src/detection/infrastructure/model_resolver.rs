@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
@@ -82,47 +82,71 @@ pub fn model_cache_dir() -> Result<PathBuf, ModelResolveError> {
 }
 
 fn download(url: &str, dest: &Path, progress: Option<ProgressFn>) -> Result<(), ModelResolveError> {
-    let response = reqwest::blocking::get(url).map_err(|e| ModelResolveError::Download {
-        url: url.to_string(),
-        source: e,
-    })?;
+    let temp_path = dest.with_extension("part");
+
+    let result = download_inner(url, dest, &temp_path, progress);
+
+    // Clean up .part file on any error
+    if result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+
+    result
+}
+
+fn download_inner(
+    url: &str,
+    dest: &Path,
+    temp_path: &Path,
+    progress: Option<ProgressFn>,
+) -> Result<(), ModelResolveError> {
+    let response = reqwest::blocking::get(url)
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| ModelResolveError::Download {
+            url: url.to_string(),
+            source: e,
+        })?;
 
     let total = response.content_length().unwrap_or(0);
     let mut downloaded: u64 = 0;
 
     // Write to a temp file first, then rename for atomicity
-    let temp_path = dest.with_extension("part");
-    let mut file = fs::File::create(&temp_path).map_err(|e| ModelResolveError::Write {
-        path: temp_path.clone(),
+    let mut file = fs::File::create(temp_path).map_err(|e| ModelResolveError::Write {
+        path: temp_path.to_path_buf(),
         source: e,
     })?;
 
-    let bytes = response.bytes().map_err(|e| ModelResolveError::Download {
-        url: url.to_string(),
-        source: e,
-    })?;
-
-    // Report progress in chunks to avoid excessive callbacks
-    let chunk_size = 1024 * 1024; // 1MB
-    for chunk in bytes.chunks(chunk_size) {
-        file.write_all(chunk)
+    // Stream the response body in chunks instead of buffering in memory.
+    // This avoids loading large models (100MB+) entirely into RAM and
+    // provides accurate progress reporting during the actual download.
+    let mut reader = response;
+    let mut buf = vec![0u8; 1024 * 1024]; // 1MB buffer
+    loop {
+        let n = reader.read(&mut buf).map_err(|e| ModelResolveError::Write {
+            path: temp_path.to_path_buf(),
+            source: e,
+        })?;
+        if n == 0 {
+            break;
+        }
+        file.write_all(&buf[..n])
             .map_err(|e| ModelResolveError::Write {
-                path: temp_path.clone(),
+                path: temp_path.to_path_buf(),
                 source: e,
             })?;
-        downloaded += chunk.len() as u64;
+        downloaded += n as u64;
         if let Some(ref cb) = progress {
             cb(downloaded, total);
         }
     }
 
     file.flush().map_err(|e| ModelResolveError::Write {
-        path: temp_path.clone(),
+        path: temp_path.to_path_buf(),
         source: e,
     })?;
     drop(file);
 
-    fs::rename(&temp_path, dest).map_err(|e| ModelResolveError::Write {
+    fs::rename(temp_path, dest).map_err(|e| ModelResolveError::Write {
         path: dest.to_path_buf(),
         source: e,
     })?;

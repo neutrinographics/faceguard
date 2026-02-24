@@ -10,7 +10,6 @@ use video_blur_core::detection::domain::region_merger::RegionMerger;
 use video_blur_core::detection::domain::region_smoother::{RegionSmoother, DEFAULT_ALPHA};
 use video_blur_core::detection::infrastructure::bytetrack_tracker::ByteTracker;
 use video_blur_core::detection::infrastructure::model_resolver;
-use video_blur_core::detection::infrastructure::onnx_blazeface_detector::OnnxBlazefaceDetector;
 use video_blur_core::detection::infrastructure::onnx_yolo_detector::OnnxYoloDetector;
 use video_blur_core::detection::infrastructure::skip_frame_detector::SkipFrameDetector;
 use video_blur_core::pipeline::blur_faces_use_case::BlurFacesUseCase;
@@ -28,10 +27,6 @@ use video_blur_core::video::infrastructure::image_file_writer::ImageFileWriter;
 const YOLO_MODEL_NAME: &str = "yolo11n-pose_widerface.onnx";
 const YOLO_MODEL_URL: &str =
     "https://github.com/da1nerd/video-blur/releases/download/v0.1.0/yolo11n-pose_widerface.onnx";
-
-const BLAZEFACE_MODEL_NAME: &str = "blaze_face_short_range.onnx";
-const BLAZEFACE_MODEL_URL: &str =
-    "https://github.com/da1nerd/video-blur/releases/download/models-v1/blaze_face_short_range.onnx";
 
 /// Max frames a track can be lost before removal (~1 second at 30 fps).
 const TRACKER_MAX_LOST: usize = 30;
@@ -61,10 +56,6 @@ struct Cli {
     /// Blur shape: ellipse or rect.
     #[arg(long, default_value = "ellipse")]
     blur_shape: String,
-
-    /// Face detector backend: yolo or mediapipe.
-    #[arg(long, default_value = "yolo")]
-    detector: String,
 
     /// Frames to look ahead for early face blur.
     #[arg(long, default_value = "10")]
@@ -122,12 +113,6 @@ fn validate(cli: &Cli) -> Result<(), String> {
             cli.confidence
         ));
     }
-    if cli.detector != "yolo" && cli.detector != "mediapipe" {
-        return Err(format!(
-            "Detector must be 'yolo' or 'mediapipe', got '{}'",
-            cli.detector
-        ));
-    }
     if cli.blur_shape != "ellipse" && cli.blur_shape != "rect" {
         return Err(format!(
             "Blur shape must be 'ellipse' or 'rect', got '{}'",
@@ -158,33 +143,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let image_mode = is_image(input);
 
     // Resolve model
-    let (model_name, model_url) = if cli.detector == "mediapipe" {
-        (BLAZEFACE_MODEL_NAME, BLAZEFACE_MODEL_URL)
-    } else {
-        (YOLO_MODEL_NAME, YOLO_MODEL_URL)
-    };
-
-    log::info!("Resolving model: {model_name}");
+    log::info!("Resolving model: {YOLO_MODEL_NAME}");
     let model_path = model_resolver::resolve(
-        model_name,
-        model_url,
+        YOLO_MODEL_NAME,
+        YOLO_MODEL_URL,
         None,
         Some(Box::new(download_progress)),
     )?;
     eprintln!(); // newline after download progress
 
     // Build detector
+    let smoother = RegionSmoother::new(DEFAULT_ALPHA);
+    let region_builder = FaceRegionBuilder::new(DEFAULT_PADDING, Some(Box::new(smoother)));
+    let tracker = ByteTracker::new(TRACKER_MAX_LOST);
     let detector: Box<dyn video_blur_core::detection::domain::face_detector::FaceDetector> =
-        if cli.detector == "mediapipe" {
-            let det = OnnxBlazefaceDetector::new(&model_path, cli.confidence, 30.0)?;
-            Box::new(det)
-        } else {
-            let smoother = RegionSmoother::new(DEFAULT_ALPHA);
-            let region_builder = FaceRegionBuilder::new(DEFAULT_PADDING, Some(Box::new(smoother)));
-            let tracker = ByteTracker::new(TRACKER_MAX_LOST);
-            let det = OnnxYoloDetector::new(&model_path, region_builder, tracker, cli.confidence)?;
-            Box::new(det)
-        };
+        Box::new(OnnxYoloDetector::new(&model_path, region_builder, tracker, cli.confidence)?);
 
     // Wrap in skip-frame decorator if needed
     let detector: Box<dyn video_blur_core::detection::domain::face_detector::FaceDetector> =

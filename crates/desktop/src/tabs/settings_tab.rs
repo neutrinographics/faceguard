@@ -2,7 +2,7 @@ use iced::widget::{button, column, pick_list, row, slider, text, Space};
 use iced::Element;
 
 use crate::app::{scaled, Message};
-use crate::settings::{BlurShape, Detector, Settings};
+use crate::settings::{BlurShape, Settings};
 use crate::theme::muted_color;
 
 pub fn view<'a>(settings: &Settings) -> Element<'a, Message> {
@@ -11,29 +11,9 @@ pub fn view<'a>(settings: &Settings) -> Element<'a, Message> {
     let muted = muted_color(&theme);
 
     column![
-        // Detector
+        // Blur shape
         text("Detection").size(scaled(16.0, fs)),
         Space::new().height(8),
-        row![
-            text("Detector").size(scaled(13.0, fs)),
-            pick_list(
-                Detector::ALL,
-                Some(settings.detector),
-                Message::DetectorChanged
-            )
-            .text_size(scaled(13.0, fs)),
-        ]
-        .spacing(12)
-        .align_y(iced::Alignment::Center),
-        Space::new().height(4),
-        text(match settings.detector {
-            Detector::Yolo => "YOLO is more accurate with tracking.",
-            Detector::Mediapipe => "MediaPipe is lighter and faster.",
-        })
-        .size(scaled(11.0, fs))
-        .color(muted),
-        Space::new().height(16),
-        // Blur shape
         row![
             text("Blur shape").size(scaled(13.0, fs)),
             pick_list(

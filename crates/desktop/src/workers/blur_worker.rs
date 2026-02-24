@@ -13,7 +13,6 @@ use video_blur_core::detection::domain::region_smoother::{RegionSmoother, DEFAUL
 use video_blur_core::detection::infrastructure::bytetrack_tracker::ByteTracker;
 use video_blur_core::detection::infrastructure::cached_face_detector::CachedFaceDetector;
 use video_blur_core::detection::infrastructure::model_resolver;
-use video_blur_core::detection::infrastructure::onnx_blazeface_detector::OnnxBlazefaceDetector;
 use video_blur_core::detection::infrastructure::onnx_yolo_detector::OnnxYoloDetector;
 use video_blur_core::detection::infrastructure::skip_frame_detector::SkipFrameDetector;
 use video_blur_core::pipeline::blur_faces_use_case::BlurFacesUseCase;
@@ -27,10 +26,6 @@ use video_blur_core::video::infrastructure::image_file_writer::ImageFileWriter;
 const YOLO_MODEL_NAME: &str = "yolo11n-pose_widerface.onnx";
 const YOLO_MODEL_URL: &str =
     "https://github.com/da1nerd/video-blur/releases/download/v0.1.0/yolo11n-pose_widerface.onnx";
-
-const BLAZEFACE_MODEL_NAME: &str = "blaze_face_short_range.onnx";
-const BLAZEFACE_MODEL_URL: &str =
-    "https://github.com/da1nerd/video-blur/releases/download/models-v1/blaze_face_short_range.onnx";
 
 const TRACKER_MAX_LOST: usize = 30;
 const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "bmp", "tiff", "tif", "webp"];
@@ -50,7 +45,6 @@ pub enum WorkerMessage {
 pub struct BlurParams {
     pub input_path: PathBuf,
     pub output_path: PathBuf,
-    pub detector: crate::settings::Detector,
     pub blur_shape: crate::settings::BlurShape,
     pub confidence: u32,
     pub blur_strength: u32,
@@ -103,15 +97,10 @@ fn run_blur(
             Box::new(CachedFaceDetector::new(cache))
         } else {
             // Resolve model
-            let (model_name, model_url) = match params.detector {
-                crate::settings::Detector::Mediapipe => (BLAZEFACE_MODEL_NAME, BLAZEFACE_MODEL_URL),
-                crate::settings::Detector::Yolo => (YOLO_MODEL_NAME, YOLO_MODEL_URL),
-            };
-
             let tx_dl = tx.clone();
             let model_path = model_resolver::resolve(
-                model_name,
-                model_url,
+                YOLO_MODEL_NAME,
+                YOLO_MODEL_URL,
                 None,
                 Some(Box::new(move |downloaded, total| {
                     let _ = tx_dl.send(WorkerMessage::DownloadProgress(downloaded, total));
@@ -122,21 +111,13 @@ fn run_blur(
                 return Err("Cancelled".into());
             }
 
-            match params.detector {
-                crate::settings::Detector::Mediapipe => {
-                    let det = OnnxBlazefaceDetector::new(&model_path, confidence, 30.0)?;
-                    Box::new(det)
-                }
-                crate::settings::Detector::Yolo => {
-                    let smoother = RegionSmoother::new(DEFAULT_ALPHA);
-                    let region_builder =
-                        FaceRegionBuilder::new(DEFAULT_PADDING, Some(Box::new(smoother)));
-                    let tracker = ByteTracker::new(TRACKER_MAX_LOST);
-                    let det =
-                        OnnxYoloDetector::new(&model_path, region_builder, tracker, confidence)?;
-                    Box::new(SkipFrameDetector::new(Box::new(det), 2)?)
-                }
-            }
+            let smoother = RegionSmoother::new(DEFAULT_ALPHA);
+            let region_builder =
+                FaceRegionBuilder::new(DEFAULT_PADDING, Some(Box::new(smoother)));
+            let tracker = ByteTracker::new(TRACKER_MAX_LOST);
+            let det =
+                OnnxYoloDetector::new(&model_path, region_builder, tracker, confidence)?;
+            Box::new(SkipFrameDetector::new(Box::new(det), 2)?)
         };
 
     // Build blurrer

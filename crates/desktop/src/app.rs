@@ -8,7 +8,7 @@ use crossbeam_channel::Receiver;
 use iced::widget::{button, column, container, row, scrollable, text};
 use iced::{Element, Length, Subscription, Task, Theme};
 
-use crate::settings::{Appearance, BlurShape, Detector, Settings};
+use crate::settings::{Appearance, BlurShape, Settings};
 use crate::tabs;
 use crate::theme;
 use crate::widgets::faces_well::FacesWellState;
@@ -88,7 +88,6 @@ pub enum Message {
     ToggleFace(u32),
     ToggleGroup(usize),
     GroupFacesToggled(bool),
-    DetectorChanged(Detector),
     BlurShapeChanged(BlurShape),
     ConfidenceChanged(u32),
     BlurStrengthChanged(u32),
@@ -223,7 +222,6 @@ impl App {
                 if let Some(input) = self.input_path.clone() {
                     let params = PreviewParams {
                         input_path: input,
-                        detector: self.settings.detector,
                         confidence: self.settings.confidence,
                     };
                     let (rx, cancel) = preview_worker::spawn(params);
@@ -240,7 +238,6 @@ impl App {
                     let params = BlurParams {
                         input_path: input,
                         output_path: output,
-                        detector: self.settings.detector,
                         blur_shape: self.settings.blur_shape,
                         confidence: self.settings.confidence,
                         blur_strength: self.settings.blur_strength,
@@ -348,11 +345,6 @@ impl App {
             Message::DismissComplete => {
                 self.processing = ProcessingState::Idle;
             }
-            Message::DetectorChanged(detector) => {
-                self.settings.detector = detector;
-                self.settings.save();
-                self.invalidate_detection();
-            }
             Message::BlurShapeChanged(shape) => {
                 self.settings.blur_shape = shape;
                 self.settings.save();
@@ -372,9 +364,7 @@ impl App {
             }
             Message::RestoreDefaults => {
                 let defaults = Settings::default();
-                let detection_changed = self.settings.detector != defaults.detector
-                    || self.settings.confidence != defaults.confidence;
-                self.settings.detector = defaults.detector;
+                let detection_changed = self.settings.confidence != defaults.confidence;
                 self.settings.blur_shape = defaults.blur_shape;
                 self.settings.confidence = defaults.confidence;
                 self.settings.blur_strength = defaults.blur_strength;
