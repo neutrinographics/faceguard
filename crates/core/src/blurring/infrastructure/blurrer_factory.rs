@@ -123,14 +123,12 @@ mod tests {
 
         blurrer.blur(&mut frame, &[region(10, 10, 30, 30)]).unwrap();
 
-        // Neighboring pixel should have blur spread
         let neighbor = (19 * 50 + 22) * 3;
         assert!(frame.data()[neighbor] > 0);
     }
 
     #[test]
     fn test_gpu_available_returns_bool() {
-        // Just verify it doesn't panic — result depends on hardware
         let _ = gpu_available();
     }
 }

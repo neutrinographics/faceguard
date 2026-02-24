@@ -4,9 +4,8 @@ use crate::blurring::domain::frame_blurrer::FrameBlurrer;
 use crate::shared::frame::Frame;
 use crate::shared::region::Region;
 
-use super::gaussian;
+use super::gaussian::{self, RoiRect};
 
-/// Default kernel size for Gaussian blur.
 const DEFAULT_KERNEL_SIZE: usize = 201;
 
 /// CPU elliptical blurrer using separable Gaussian blur with ellipse masking.
@@ -25,7 +24,7 @@ pub struct CpuEllipticalBlurrer {
 impl CpuEllipticalBlurrer {
     pub fn new(kernel_size: usize) -> Self {
         let scale = (kernel_size / 50).max(1);
-        let small_k = (kernel_size / scale) | 1; // ensure odd
+        let small_k = (kernel_size / scale) | 1;
         Self {
             kernel: gaussian::gaussian_kernel_1d(kernel_size),
             scale,
@@ -62,80 +61,65 @@ impl FrameBlurrer for CpuEllipticalBlurrer {
                 continue;
             }
 
-            // Extract ROI (reuse buffer across regions)
+            let rect = RoiRect {
+                x: rx,
+                y: ry,
+                w: rw,
+                h: rh,
+            };
             let mut roi = self.roi_buf.borrow_mut();
-            let roi_size = rw * rh * channels;
-            roi.resize(roi_size, 0);
-            for row in 0..rh {
-                let src_offset = ((ry + row) * fw + rx) * channels;
-                let dst_offset = row * rw * channels;
-                roi[dst_offset..dst_offset + rw * channels]
-                    .copy_from_slice(&data[src_offset..src_offset + rw * channels]);
-            }
-
-            // Blur ROI (with downscale optimization for large kernels)
             let mut temp = self.blur_temp.borrow_mut();
-            if self.scale <= 1 || rh < self.scale * 2 || rw < self.scale * 2 {
-                gaussian::separable_gaussian_blur_with_kernel(
-                    &mut roi,
-                    rw,
-                    rh,
-                    channels,
-                    &self.kernel,
-                    &mut temp,
-                );
-            } else {
-                let (mut small, sw, sh) = gaussian::downscale(&roi, rw, rh, channels, self.scale);
-                gaussian::separable_gaussian_blur_with_kernel(
-                    &mut small,
-                    sw,
-                    sh,
-                    channels,
-                    &self.small_kernel,
-                    &mut temp,
-                );
-                let upscaled = gaussian::upscale(&small, sw, sh, channels, rw, rh);
-                roi[..roi_size].copy_from_slice(&upscaled);
-            }
 
-            // Get ellipse geometry from region
-            let (ecx, ecy) = r.ellipse_center_in_roi();
-            let (semi_a, semi_b) = r.ellipse_axes();
-            let inv_a_sq = if semi_a > 0.0 {
-                1.0 / (semi_a * semi_a)
-            } else {
-                0.0
-            };
-            let inv_b_sq = if semi_b > 0.0 {
-                1.0 / (semi_b * semi_b)
-            } else {
-                0.0
-            };
-            let ellipse_valid = semi_a > 0.0 && semi_b > 0.0;
+            gaussian::extract_roi(data, fw, channels, rect, &mut roi);
+            gaussian::blur_roi_in_place(
+                &mut roi,
+                rw,
+                rh,
+                channels,
+                &self.kernel,
+                &self.small_kernel,
+                self.scale,
+                &mut temp,
+            );
 
-            // Composite blurred pixels within ellipse mask back into frame
-            for row in 0..rh {
-                for col in 0..rw {
-                    // Ellipse SDF: (dx^2 * inv_a_sq) + (dy^2 * inv_b_sq) <= 1
-                    let dx = col as f64 - ecx;
-                    let dy = row as f64 - ecy;
-                    let ellipse_dist = if ellipse_valid {
-                        dx * dx * inv_a_sq + dy * dy * inv_b_sq
-                    } else {
-                        f64::MAX
-                    };
-
-                    if ellipse_dist <= 1.0 {
-                        let frame_offset = ((ry + row) * fw + (rx + col)) * channels;
-                        let roi_offset = (row * rw + col) * channels;
-                        data[frame_offset..frame_offset + channels]
-                            .copy_from_slice(&roi[roi_offset..roi_offset + channels]);
-                    }
-                }
-            }
+            composite_ellipse(data, &roi, fw, channels, rect, r);
         }
 
         Ok(())
+    }
+}
+
+/// Write blurred pixels back to the frame only within the ellipse mask.
+fn composite_ellipse(
+    data: &mut [u8],
+    roi: &[u8],
+    frame_width: usize,
+    channels: usize,
+    rect: RoiRect,
+    region: &Region,
+) {
+    let (ecx, ecy) = region.ellipse_center_in_roi();
+    let (semi_a, semi_b) = region.ellipse_axes();
+
+    if semi_a <= 0.0 || semi_b <= 0.0 {
+        return;
+    }
+
+    let inv_a_sq = 1.0 / (semi_a * semi_a);
+    let inv_b_sq = 1.0 / (semi_b * semi_b);
+
+    for row in 0..rect.h {
+        for col in 0..rect.w {
+            let dx = col as f64 - ecx;
+            let dy = row as f64 - ecy;
+
+            if dx * dx * inv_a_sq + dy * dy * inv_b_sq <= 1.0 {
+                let frame_offset = ((rect.y + row) * frame_width + (rect.x + col)) * channels;
+                let roi_offset = (row * rect.w + col) * channels;
+                data[frame_offset..frame_offset + channels]
+                    .copy_from_slice(&roi[roi_offset..roi_offset + channels]);
+            }
+        }
     }
 }
 
@@ -183,7 +167,6 @@ mod tests {
     #[test]
     fn test_blur_modifies_region_pixels() {
         let mut frame = make_frame(100, 100, 0);
-        // Set a bright patch inside where the ellipse will be
         let data = frame.data_mut();
         for y in 18..22 {
             for x in 18..22 {
@@ -195,12 +178,9 @@ mod tests {
         }
 
         let blurrer = CpuEllipticalBlurrer::new(5);
-        // Region centered at (20, 20) with size 30x30 — ellipse covers the center
         blurrer.blur(&mut frame, &[region(5, 5, 30, 30)]).unwrap();
 
-        // Bright pixels inside the ellipse should have been blurred
         let center = (20 * 100 + 20) * 3;
-        // At minimum, some spreading should have occurred
         assert!(frame.data()[center] < 255 || frame.data()[(18 * 100 + 18) * 3] < 255);
     }
 
@@ -211,19 +191,15 @@ mod tests {
         let blurrer = CpuEllipticalBlurrer::new(5);
         blurrer.blur(&mut frame, &[region(10, 10, 20, 20)]).unwrap();
 
-        // Pixel at (0,0) should be unchanged
         assert_eq!(frame.data()[0], original[0]);
-        // Pixel at (50,50) should be unchanged
         let idx = (50 * 100 + 50) * 3;
         assert_eq!(frame.data()[idx], original[idx]);
     }
 
     #[test]
     fn test_ellipse_does_not_blur_corners() {
-        // Create a region where corners are outside the ellipse
         let mut frame = make_frame(100, 100, 0);
         let data = frame.data_mut();
-        // Set the entire region to white
         for y in 0..40 {
             for x in 0..40 {
                 let idx = (y * 100 + x) * 3;
@@ -237,9 +213,7 @@ mod tests {
         let blurrer = CpuEllipticalBlurrer::new(5);
         blurrer.blur(&mut frame, &[region(0, 0, 40, 40)]).unwrap();
 
-        // Corner pixel (0,0) is outside the ellipse — should be unchanged
-        // Ellipse center is at (20, 20) with semi-axes (20, 20)
-        // Corner (0,0) has distance ((0-20)/20)^2 + ((0-20)/20)^2 = 1+1 = 2 > 1
+        // Corner (0,0) is outside the ellipse — ellipse distance is 2.0 > 1.0
         assert_eq!(frame.data()[0], original[0]);
     }
 
@@ -247,12 +221,10 @@ mod tests {
     fn test_multiple_regions() {
         let mut frame = make_frame(100, 100, 0);
         let data = frame.data_mut();
-        // Bright spot in center of first region
         let idx1 = (20 * 100 + 20) * 3;
         data[idx1] = 255;
         data[idx1 + 1] = 255;
         data[idx1 + 2] = 255;
-        // Bright spot in center of second region
         let idx2 = (75 * 100 + 75) * 3;
         data[idx2] = 255;
         data[idx2 + 1] = 255;
@@ -266,7 +238,6 @@ mod tests {
             )
             .unwrap();
 
-        // Both spots should have been blurred (are within their ellipses)
         assert!(frame.data()[idx1] < 255);
         assert!(frame.data()[idx2] < 255);
     }
@@ -282,7 +253,6 @@ mod tests {
 
     #[test]
     fn test_ellipse_uses_full_dimensions() {
-        // Region clipped at left edge: full ellipse extends off-screen
         let r = Region {
             x: 0,
             y: 10,
@@ -298,13 +268,10 @@ mod tests {
         let (ecx, _ecy) = r.ellipse_center_in_roi();
         let (sa, sb) = r.ellipse_axes();
 
-        // The ellipse center should be offset (to the left of the visible region)
         assert!(ecx < r.width as f64 / 2.0);
-        // Semi-axes use full dimensions
-        assert_eq!(sa, 30.0); // full_width / 2
-        assert_eq!(sb, 20.0); // full_height / 2
+        assert_eq!(sa, 30.0);
+        assert_eq!(sb, 20.0);
 
-        // Verify blurring doesn't crash with this region
         let mut frame = make_frame(100, 100, 128);
         let blurrer = CpuEllipticalBlurrer::new(5);
         blurrer.blur(&mut frame, &[r]).unwrap();

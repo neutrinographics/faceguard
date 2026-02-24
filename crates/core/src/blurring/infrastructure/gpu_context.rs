@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use wgpu::{self};
+use wgpu;
 
 /// Descriptor for a single region to blur in a batch.
 pub struct RoiDescriptor {
@@ -137,7 +137,6 @@ impl GpuContext {
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("blur-bind-group-layout"),
             entries: &[
-                // params uniform
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::COMPUTE,
@@ -148,7 +147,6 @@ impl GpuContext {
                     },
                     count: None,
                 },
-                // input storage (read)
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
                     visibility: wgpu::ShaderStages::COMPUTE,
@@ -159,7 +157,6 @@ impl GpuContext {
                     },
                     count: None,
                 },
-                // output storage (read-write)
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
                     visibility: wgpu::ShaderStages::COMPUTE,
@@ -170,7 +167,6 @@ impl GpuContext {
                     },
                     count: None,
                 },
-                // original storage (read)
                 wgpu::BindGroupLayoutEntry {
                     binding: 3,
                     visibility: wgpu::ShaderStages::COMPUTE,
@@ -181,7 +177,6 @@ impl GpuContext {
                     },
                     count: None,
                 },
-                // kernel_weights storage (read)
                 wgpu::BindGroupLayoutEntry {
                     binding: 4,
                     visibility: wgpu::ShaderStages::COMPUTE,
@@ -226,8 +221,7 @@ impl GpuContext {
             mapped_at_creation: false,
         });
 
-        // Initial kernel weights buffer (will grow as needed)
-        let initial_kernel_capacity = 201; // covers default kernel_size
+        let initial_kernel_capacity = 201;
         let kernel_weights = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("cached-kernel-weights"),
             size: (initial_kernel_capacity * 4) as u64,
@@ -311,7 +305,6 @@ impl GpuContext {
 
         let mut cache = self.buffers.lock().unwrap();
 
-        // Find max ROI size and total staging bytes needed.
         let max_pixels = rois
             .iter()
             .map(|r| (r.width * r.height) as usize)
@@ -322,7 +315,6 @@ impl GpuContext {
             .map(|r| (r.width as u64) * (r.height as u64) * 4)
             .sum();
 
-        // Grow pixel buffers if needed (never shrink).
         if max_pixels > cache.capacity {
             let (inp, out, orig, stg) = make_pixel_buffers(&self.device, max_pixels);
             cache.input = inp;
@@ -332,7 +324,6 @@ impl GpuContext {
             cache.capacity = max_pixels;
         }
 
-        // Grow batch staging buffer if needed.
         let total_staging_usize = total_staging_bytes as usize;
         if total_staging_usize > cache.batch_staging_capacity || cache.batch_staging.is_none() {
             cache.batch_staging = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
@@ -344,7 +335,6 @@ impl GpuContext {
             cache.batch_staging_capacity = total_staging_usize;
         }
 
-        // Process each ROI: upload, encode, submit (but don't poll yet).
         let mut offsets: Vec<(u64, usize)> = Vec::with_capacity(rois.len());
         let mut staging_offset: u64 = 0;
 
@@ -355,7 +345,6 @@ impl GpuContext {
             let sigma = roi.kernel_size as f32 / 6.0;
             let kernel_len = (2 * kernel_radius + 1) as usize;
 
-            // Compute kernel weights on CPU
             let sigma64 = roi.kernel_size as f64 / 6.0;
             let half = kernel_radius as f64;
             let weights: Vec<f32> = (0..kernel_len)
@@ -365,7 +354,6 @@ impl GpuContext {
                 })
                 .collect();
 
-            // Grow kernel weights buffer if needed
             if kernel_len > cache.kernel_weights_capacity {
                 cache.kernel_weights = self.device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("cached-kernel-weights"),
@@ -378,13 +366,11 @@ impl GpuContext {
             self.queue
                 .write_buffer(&cache.kernel_weights, 0, bytemuck::cast_slice(&weights));
 
-            // Upload pixel data
             self.queue
                 .write_buffer(&cache.input, 0, bytemuck::cast_slice(&roi.pixels));
             self.queue
                 .write_buffer(&cache.original, 0, bytemuck::cast_slice(&roi.pixels));
 
-            // Write params
             let params_h = GpuBlurParams {
                 width: roi.width,
                 height: roi.height,
@@ -409,7 +395,6 @@ impl GpuContext {
             self.queue
                 .write_buffer(&cache.params_v, 0, bytemuck::bytes_of(&params_v));
 
-            // Bind groups
             let bg_h = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("bg-h"),
                 layout: &self.bind_group_layout,
@@ -467,7 +452,6 @@ impl GpuContext {
             let workgroups_x = roi.width.div_ceil(16);
             let workgroups_y = roi.height.div_ceil(16);
 
-            // Encode blur passes + copy to batch staging
             let mut encoder = self
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -496,7 +480,6 @@ impl GpuContext {
                 pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
             }
 
-            // Copy result to batch staging at this ROI's offset
             encoder.copy_buffer_to_buffer(
                 &cache.output,
                 0,
@@ -505,14 +488,12 @@ impl GpuContext {
                 buf_size,
             );
 
-            // Submit this ROI's work (so next ROI's write_buffer won't overwrite)
             self.queue.submit(Some(encoder.finish()));
 
             offsets.push((staging_offset, pixel_count));
             staging_offset += buf_size;
         }
 
-        // Single synchronous readback for all ROIs
         let batch_buf = cache.batch_staging.as_ref().unwrap();
         let slice = batch_buf.slice(..total_staging_bytes);
         slice.map_async(wgpu::MapMode::Read, |_| {});
@@ -533,6 +514,65 @@ impl GpuContext {
         batch_buf.unmap();
 
         results
+    }
+}
+
+/// Pack RGB frame data for a rectangular ROI into GPU-ready u32 pixels.
+#[allow(clippy::too_many_arguments)]
+pub fn pack_roi(
+    data: &[u8],
+    frame_width: usize,
+    channels: usize,
+    rx: usize,
+    ry: usize,
+    rw: usize,
+    rh: usize,
+) -> Vec<u32> {
+    let mut packed = Vec::with_capacity(rw * rh);
+    for row in 0..rh {
+        for col in 0..rw {
+            let offset = ((ry + row) * frame_width + (rx + col)) * channels;
+            let r = data[offset] as u32;
+            let g = if channels > 1 {
+                data[offset + 1] as u32
+            } else {
+                0
+            };
+            let b = if channels > 2 {
+                data[offset + 2] as u32
+            } else {
+                0
+            };
+            packed.push(r | (g << 8) | (b << 16) | (255 << 24));
+        }
+    }
+    packed
+}
+
+/// Unpack GPU result u32 pixels back into RGB frame data.
+#[allow(clippy::too_many_arguments)]
+pub fn unpack_roi(
+    data: &mut [u8],
+    result: &[u32],
+    frame_width: usize,
+    channels: usize,
+    rx: usize,
+    ry: usize,
+    rw: usize,
+    rh: usize,
+) {
+    for row in 0..rh {
+        for col in 0..rw {
+            let pixel = result[row * rw + col];
+            let offset = ((ry + row) * frame_width + (rx + col)) * channels;
+            data[offset] = (pixel & 0xFF) as u8;
+            if channels > 1 {
+                data[offset + 1] = ((pixel >> 8) & 0xFF) as u8;
+            }
+            if channels > 2 {
+                data[offset + 2] = ((pixel >> 16) & 0xFF) as u8;
+            }
+        }
     }
 }
 

@@ -4,9 +4,8 @@ use crate::blurring::domain::frame_blurrer::FrameBlurrer;
 use crate::shared::frame::Frame;
 use crate::shared::region::Region;
 
-use super::gpu_context::{GpuContext, RoiDescriptor};
+use super::gpu_context::{pack_roi, unpack_roi, GpuContext, RoiDescriptor};
 
-/// Default kernel size for GPU Gaussian blur.
 const DEFAULT_KERNEL_SIZE: u32 = 201;
 
 /// GPU elliptical blurrer using a wgpu compute shader.
@@ -43,7 +42,6 @@ impl FrameBlurrer for GpuEllipticalBlurrer {
         let channels = frame.channels() as usize;
         let data = frame.data_mut();
 
-        // Build ROI descriptors and track region geometry for unpacking.
         let mut descriptors: Vec<RoiDescriptor> = Vec::with_capacity(regions.len());
         let mut region_info: Vec<(usize, usize, usize, usize)> = Vec::with_capacity(regions.len());
 
@@ -60,27 +58,8 @@ impl FrameBlurrer for GpuEllipticalBlurrer {
             let (ecx, ecy) = r.ellipse_center_in_roi();
             let (semi_a, semi_b) = r.ellipse_axes();
 
-            let mut packed: Vec<u32> = Vec::with_capacity(rw * rh);
-            for row in 0..rh {
-                for col in 0..rw {
-                    let offset = ((ry + row) * fw + (rx + col)) * channels;
-                    let r_val = data[offset] as u32;
-                    let g_val = if channels > 1 {
-                        data[offset + 1] as u32
-                    } else {
-                        0
-                    };
-                    let b_val = if channels > 2 {
-                        data[offset + 2] as u32
-                    } else {
-                        0
-                    };
-                    packed.push(r_val | (g_val << 8) | (b_val << 16) | (255 << 24));
-                }
-            }
-
             descriptors.push(RoiDescriptor {
-                pixels: packed,
+                pixels: pack_roi(data, fw, channels, rx, ry, rw, rh),
                 width: rw as u32,
                 height: rh as u32,
                 kernel_size: self.kernel_size,
@@ -93,24 +72,10 @@ impl FrameBlurrer for GpuEllipticalBlurrer {
             region_info.push((rx, ry, rw, rh));
         }
 
-        // Batch blur all regions with single GPU readback.
         let results = self.ctx.blur_rois(&descriptors);
 
-        // Unpack all results back to frame.
         for (result, &(rx, ry, rw, rh)) in results.iter().zip(region_info.iter()) {
-            for row in 0..rh {
-                for col in 0..rw {
-                    let pixel = result[row * rw + col];
-                    let offset = ((ry + row) * fw + (rx + col)) * channels;
-                    data[offset] = (pixel & 0xFF) as u8;
-                    if channels > 1 {
-                        data[offset + 1] = ((pixel >> 8) & 0xFF) as u8;
-                    }
-                    if channels > 2 {
-                        data[offset + 2] = ((pixel >> 16) & 0xFF) as u8;
-                    }
-                }
-            }
+            unpack_roi(data, result, fw, channels, rx, ry, rw, rh);
         }
 
         Ok(())
@@ -165,7 +130,6 @@ mod tests {
         };
         let mut frame = make_frame(50, 50, 0);
         let data = frame.data_mut();
-        // Bright spot in center of region (inside ellipse)
         for y in 20..25 {
             for x in 20..25 {
                 let idx = (y * 50 + x) * 3;
@@ -178,9 +142,7 @@ mod tests {
         let blurrer = GpuEllipticalBlurrer::new(ctx, 5);
         blurrer.blur(&mut frame, &[region(10, 10, 30, 30)]).unwrap();
 
-        // Center pixel (within ellipse) should be blurred
         let center = (22 * 50 + 22) * 3;
-        // The bright patch should have been blurred
         assert!(
             frame.data()[center] < 255 || frame.data()[(19 * 50 + 22) * 3] > 0,
             "GPU elliptical blur should modify pixels within ellipse"
@@ -196,10 +158,7 @@ mod tests {
         let mut frame = make_frame(50, 50, 100);
         let original = frame.data().to_vec();
         let blurrer = GpuEllipticalBlurrer::new(ctx, 5);
-        // Region from (0,0) to (40,40), ellipse center at (20,20)
         blurrer.blur(&mut frame, &[region(0, 0, 40, 40)]).unwrap();
-
-        // Corner pixel (0,0) is outside ellipse — should be original value
         assert_eq!(frame.data()[0], original[0]);
     }
 
@@ -213,8 +172,6 @@ mod tests {
         let original = frame.data().to_vec();
         let blurrer = GpuEllipticalBlurrer::new(ctx, 5);
         blurrer.blur(&mut frame, &[region(10, 10, 20, 20)]).unwrap();
-
-        // Pixel at (0,0) outside region
         assert_eq!(frame.data()[0], original[0]);
     }
 
@@ -237,7 +194,6 @@ mod tests {
             Some(c) => c,
             None => return,
         };
-        // Region clipped at left edge with full dimensions
         let r = Region {
             x: 0,
             y: 10,
@@ -252,7 +208,6 @@ mod tests {
 
         let mut frame = make_frame(50, 50, 128);
         let blurrer = GpuEllipticalBlurrer::new(ctx, 5);
-        // Should not crash with edge-clipped regions
         blurrer.blur(&mut frame, &[r]).unwrap();
     }
 }

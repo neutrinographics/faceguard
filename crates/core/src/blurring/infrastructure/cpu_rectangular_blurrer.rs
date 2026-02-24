@@ -4,16 +4,14 @@ use crate::blurring::domain::frame_blurrer::FrameBlurrer;
 use crate::shared::frame::Frame;
 use crate::shared::region::Region;
 
-use super::gaussian;
+use super::gaussian::{self, RoiRect};
 
-/// Default kernel size for Gaussian blur.
 const DEFAULT_KERNEL_SIZE: usize = 201;
 
 /// CPU rectangular blurrer using separable Gaussian blur.
 ///
-/// Blurs the entire rectangular ROI for each region. Uses the same
-/// downscale-blur-upscale optimization as the Python implementation
-/// for large kernel sizes.
+/// Blurs the entire rectangular ROI for each region. Uses a
+/// downscale-blur-upscale optimization for large kernel sizes.
 pub struct CpuRectangularBlurrer {
     kernel: Vec<f32>,
     scale: usize,
@@ -25,7 +23,7 @@ pub struct CpuRectangularBlurrer {
 impl CpuRectangularBlurrer {
     pub fn new(kernel_size: usize) -> Self {
         let scale = (kernel_size / 50).max(1);
-        let small_k = (kernel_size / scale) | 1; // ensure odd
+        let small_k = (kernel_size / scale) | 1;
         Self {
             kernel: gaussian::gaussian_kernel_1d(kernel_size),
             scale,
@@ -62,49 +60,27 @@ impl FrameBlurrer for CpuRectangularBlurrer {
                 continue;
             }
 
-            // Extract ROI (reuse buffer across regions)
+            let rect = RoiRect {
+                x: rx,
+                y: ry,
+                w: rw,
+                h: rh,
+            };
             let mut roi = self.roi_buf.borrow_mut();
-            let roi_size = rw * rh * channels;
-            roi.resize(roi_size, 0);
-            for row in 0..rh {
-                let src_offset = ((ry + row) * fw + rx) * channels;
-                let dst_offset = row * rw * channels;
-                roi[dst_offset..dst_offset + rw * channels]
-                    .copy_from_slice(&data[src_offset..src_offset + rw * channels]);
-            }
-
-            // Blur ROI (with downscale optimization for large kernels)
             let mut temp = self.blur_temp.borrow_mut();
-            if self.scale <= 1 || rh < self.scale * 2 || rw < self.scale * 2 {
-                gaussian::separable_gaussian_blur_with_kernel(
-                    &mut roi,
-                    rw,
-                    rh,
-                    channels,
-                    &self.kernel,
-                    &mut temp,
-                );
-            } else {
-                let (mut small, sw, sh) = gaussian::downscale(&roi, rw, rh, channels, self.scale);
-                gaussian::separable_gaussian_blur_with_kernel(
-                    &mut small,
-                    sw,
-                    sh,
-                    channels,
-                    &self.small_kernel,
-                    &mut temp,
-                );
-                let upscaled = gaussian::upscale(&small, sw, sh, channels, rw, rh);
-                roi[..roi_size].copy_from_slice(&upscaled);
-            }
 
-            // Write blurred ROI back
-            for row in 0..rh {
-                let dst_offset = ((ry + row) * fw + rx) * channels;
-                let src_offset = row * rw * channels;
-                data[dst_offset..dst_offset + rw * channels]
-                    .copy_from_slice(&roi[src_offset..src_offset + rw * channels]);
-            }
+            gaussian::extract_roi(data, fw, channels, rect, &mut roi);
+            gaussian::blur_roi_in_place(
+                &mut roi,
+                rw,
+                rh,
+                channels,
+                &self.kernel,
+                &self.small_kernel,
+                self.scale,
+                &mut temp,
+            );
+            gaussian::write_roi_back(data, &roi, fw, channels, rect);
         }
 
         Ok(())
@@ -155,7 +131,6 @@ mod tests {
     #[test]
     fn test_blur_modifies_region_pixels() {
         let mut frame = make_frame(100, 100, 0);
-        // Set a small bright patch in the region
         let data = frame.data_mut();
         for y in 10..15 {
             for x in 10..15 {
@@ -169,10 +144,7 @@ mod tests {
         let blurrer = CpuRectangularBlurrer::new(5);
         blurrer.blur(&mut frame, &[region(5, 5, 30, 30)]).unwrap();
 
-        // The bright patch borders dark pixels within the ROI — the Gaussian blur
-        // should spread brightness into adjacent dark pixels.
-        // Check a pixel just outside the bright patch but inside the region.
-        let neighbor = (9 * 100 + 12) * 3; // one row above the bright patch
+        let neighbor = (9 * 100 + 12) * 3;
         assert!(
             frame.data()[neighbor] > 0,
             "blur should spread to adjacent pixels"
@@ -182,16 +154,13 @@ mod tests {
     #[test]
     fn test_pixels_outside_region_unchanged() {
         let mut frame = make_frame(100, 100, 0);
-        // Set bright pixels everywhere
         frame.data_mut().fill(200);
 
         let original = frame.data().to_vec();
         let blurrer = CpuRectangularBlurrer::new(5);
         blurrer.blur(&mut frame, &[region(10, 10, 20, 20)]).unwrap();
 
-        // Pixel at (0,0) should be unchanged
         assert_eq!(frame.data()[0], original[0]);
-        // Pixel at (50,50) should be unchanged
         let idx = (50 * 100 + 50) * 3;
         assert_eq!(frame.data()[idx], original[idx]);
     }
@@ -200,10 +169,8 @@ mod tests {
     fn test_multiple_regions() {
         let mut frame = make_frame(100, 100, 0);
         let data = frame.data_mut();
-        // Bright spot in first region
         let idx1 = (15 * 100 + 15) * 3;
         data[idx1] = 255;
-        // Bright spot in second region
         let idx2 = (75 * 100 + 75) * 3;
         data[idx2] = 255;
 
@@ -215,7 +182,6 @@ mod tests {
             )
             .unwrap();
 
-        // Both bright spots should have been blurred (spread)
         assert!(frame.data()[idx1] < 255);
         assert!(frame.data()[idx2] < 255);
     }
@@ -239,7 +205,6 @@ mod tests {
         let blurrer = CpuRectangularBlurrer::new(5);
         blurrer.blur(&mut frame, &[region(0, 0, 50, 50)]).unwrap();
 
-        // Center should be blurred down
         assert!(frame.data()[center] < 255);
     }
 
@@ -254,6 +219,6 @@ mod tests {
         let blurrer = CpuRectangularBlurrer::new(201);
         assert!(blurrer.scale > 1);
         assert!(blurrer.small_kernel.len() < blurrer.kernel.len());
-        assert_eq!(blurrer.small_kernel.len() % 2, 1); // must be odd
+        assert_eq!(blurrer.small_kernel.len() % 2, 1);
     }
 }

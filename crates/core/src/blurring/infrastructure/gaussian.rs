@@ -1,3 +1,12 @@
+/// ROI rectangle within a frame, used to pass region coordinates without many arguments.
+#[derive(Clone, Copy)]
+pub struct RoiRect {
+    pub x: usize,
+    pub y: usize,
+    pub w: usize,
+    pub h: usize,
+}
+
 /// Precompute a 1D Gaussian kernel of the given size.
 ///
 /// `kernel_size` must be odd and >= 1. Sigma is derived as `kernel_size / 6.0`
@@ -6,7 +15,6 @@ pub fn gaussian_kernel_1d(kernel_size: usize) -> Vec<f32> {
     debug_assert!(kernel_size >= 1 && kernel_size % 2 == 1);
     let sigma = kernel_size as f64 / 6.0;
     let half = (kernel_size / 2) as f64;
-    // Compute in f64 for precision, then convert to f32
     let mut kernel_f64: Vec<f64> = (0..kernel_size)
         .map(|i| {
             let x = i as f64 - half;
@@ -54,7 +62,6 @@ pub fn separable_gaussian_blur_with_kernel(
     }
     let half = kernel_size / 2;
 
-    // Reuse temp buffer (only reallocates if capacity is insufficient)
     let needed = width * height * channels;
     temp.resize(needed, 0.0);
 
@@ -88,6 +95,62 @@ pub fn separable_gaussian_blur_with_kernel(
                 data[(y * width + x) * channels + c] = sum.round().clamp(0.0, 255.0) as u8;
             }
         }
+    }
+}
+
+/// Extract a rectangular ROI from frame data into a reusable buffer.
+pub fn extract_roi(
+    data: &[u8],
+    frame_width: usize,
+    channels: usize,
+    rect: RoiRect,
+    roi: &mut Vec<u8>,
+) {
+    roi.resize(rect.w * rect.h * channels, 0);
+    for row in 0..rect.h {
+        let src_offset = ((rect.y + row) * frame_width + rect.x) * channels;
+        let dst_offset = row * rect.w * channels;
+        roi[dst_offset..dst_offset + rect.w * channels]
+            .copy_from_slice(&data[src_offset..src_offset + rect.w * channels]);
+    }
+}
+
+/// Write a blurred ROI buffer back into frame data.
+pub fn write_roi_back(
+    data: &mut [u8],
+    roi: &[u8],
+    frame_width: usize,
+    channels: usize,
+    rect: RoiRect,
+) {
+    for row in 0..rect.h {
+        let dst_offset = ((rect.y + row) * frame_width + rect.x) * channels;
+        let src_offset = row * rect.w * channels;
+        data[dst_offset..dst_offset + rect.w * channels]
+            .copy_from_slice(&roi[src_offset..src_offset + rect.w * channels]);
+    }
+}
+
+/// Apply Gaussian blur to an ROI buffer, using downscale optimization for large kernels.
+#[allow(clippy::too_many_arguments)]
+pub fn blur_roi_in_place(
+    roi: &mut [u8],
+    rw: usize,
+    rh: usize,
+    channels: usize,
+    kernel: &[f32],
+    small_kernel: &[f32],
+    scale: usize,
+    temp: &mut Vec<f32>,
+) {
+    if scale <= 1 || rh < scale * 2 || rw < scale * 2 {
+        separable_gaussian_blur_with_kernel(roi, rw, rh, channels, kernel, temp);
+    } else {
+        let roi_size = rw * rh * channels;
+        let (mut small, sw, sh) = downscale(roi, rw, rh, channels, scale);
+        separable_gaussian_blur_with_kernel(&mut small, sw, sh, channels, small_kernel, temp);
+        let upscaled = upscale(&small, sw, sh, channels, rw, rh);
+        roi[..roi_size].copy_from_slice(&upscaled);
     }
 }
 
