@@ -113,10 +113,16 @@ fn run_blur(
                 FaceRegionBuilder::new(DEFAULT_PADDING, Some(Box::new(smoother)));
             let tracker = ByteTracker::new(TRACKER_MAX_LOST);
             let det = match params.model_cache.get_yolo_session() {
-                Some((session, input_size)) => OnnxYoloDetector::from_shared_session(
-                    session, input_size, region_builder, tracker, confidence,
-                ),
-                None => OnnxYoloDetector::new(&model_path, region_builder, tracker, confidence)?,
+                Some((session, input_size)) => {
+                    log::info!("Blur: using shared YOLO session");
+                    OnnxYoloDetector::from_shared_session(
+                        session, input_size, region_builder, tracker, confidence,
+                    )
+                }
+                None => {
+                    log::info!("Blur: building new YOLO session from path");
+                    OnnxYoloDetector::new(&model_path, region_builder, tracker, confidence)?
+                }
             };
             Box::new(SkipFrameDetector::new(Box::new(det), 2)?)
         };

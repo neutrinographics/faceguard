@@ -51,11 +51,16 @@ impl ModelCache {
 
             // Pre-build the ONNX session from the resolved path
             if let Some(Ok(ref path)) = *yolo_path_slot.result.lock().unwrap() {
+                log::info!("Building YOLO session from {}", path.display());
+                let start = std::time::Instant::now();
                 if let Ok(session) = onnx_yolo_detector::OnnxYoloDetector::build_session(path) {
+                    log::info!("YOLO session built in {:?}", start.elapsed());
                     let input_size = onnx_yolo_detector::session_input_size(&session);
                     *session_slot.input_size.lock().unwrap() = input_size;
                     *session_slot.session.lock().unwrap() =
                         Some(Arc::new(Mutex::new(session)));
+                } else {
+                    log::warn!("Failed to build YOLO session");
                 }
             }
             *session_slot.built.lock().unwrap() = true;
