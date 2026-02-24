@@ -7,6 +7,7 @@ use std::thread;
 use crossbeam_channel::{Receiver, Sender};
 
 use video_blur_core::blurring::infrastructure::blurrer_factory;
+use video_blur_core::blurring::infrastructure::gpu_context::GpuContext;
 use video_blur_core::detection::domain::face_region_builder::{FaceRegionBuilder, DEFAULT_PADDING};
 use video_blur_core::detection::domain::region_merger::RegionMerger;
 use video_blur_core::detection::domain::region_smoother::{RegionSmoother, DEFAULT_ALPHA};
@@ -50,6 +51,8 @@ pub struct BlurParams {
     pub blur_ids: Option<HashSet<u32>>,
     /// Shared model cache for pre-loaded model paths.
     pub model_cache: Arc<ModelCache>,
+    /// Pre-built GPU context for blur compute shaders (avoids per-job init).
+    pub gpu_context: Option<Arc<GpuContext>>,
 }
 
 fn is_image(path: &std::path::Path) -> bool {
@@ -128,12 +131,16 @@ fn run_blur(
             Box::new(SkipFrameDetector::new(Box::new(det), 2)?)
         };
 
-    // Build blurrer
+    // Build blurrer (reuse cached GPU context to avoid expensive re-initialization)
     let blur_shape = match params.blur_shape {
         crate::settings::BlurShape::Ellipse => blurrer_factory::BlurShape::Elliptical,
         crate::settings::BlurShape::Rect => blurrer_factory::BlurShape::Rectangular,
     };
-    let blurrer = blurrer_factory::create_blurrer(blur_shape, params.blur_strength as usize);
+    let blurrer = blurrer_factory::create_blurrer_with_context(
+        blur_shape,
+        params.blur_strength as usize,
+        params.gpu_context.clone(),
+    );
 
     if image_mode {
         // Image mode — no progress needed
@@ -159,6 +166,9 @@ fn run_blur(
         let writer: Box<dyn video_blur_core::video::domain::video_writer::VideoWriter> =
             Box::new(FfmpegWriter::new());
         let merger = RegionMerger::new();
+
+        // Send initial progress so UI transitions from "Preparing..." immediately
+        let _ = tx.send(WorkerMessage::BlurProgress(0, metadata.total_frames));
 
         let tx_progress = tx.clone();
         let cancelled_progress = cancelled.clone();

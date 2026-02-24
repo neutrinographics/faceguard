@@ -15,6 +15,8 @@ use crate::widgets::faces_well::FacesWellState;
 use crate::workers::blur_worker::{self, BlurParams, WorkerMessage};
 use crate::workers::model_cache::ModelCache;
 use crate::workers::preview_worker::{self, PreviewMessage, PreviewParams};
+use video_blur_core::blurring::infrastructure::blurrer_factory;
+use video_blur_core::blurring::infrastructure::gpu_context::GpuContext;
 use video_blur_core::shared::region::Region;
 
 use iced::widget::operation;
@@ -107,8 +109,8 @@ pub struct App {
     pub faces_well: FacesWellState,
     /// Cached detection results from preview pass (for reuse in blur).
     detection_cache: Option<Arc<HashMap<usize, Vec<Region>>>>,
-    /// Whether a GPU adapter is available for blur compute shaders.
-    gpu_available: bool,
+    /// Pre-built GPU context for blur compute shaders (None if no GPU available).
+    gpu_context: Option<Arc<GpuContext>>,
     /// Pre-loaded model paths shared across workers.
     model_cache: Arc<ModelCache>,
     preview_rx: Option<Receiver<PreviewMessage>>,
@@ -127,7 +129,7 @@ impl App {
                 processing: ProcessingState::Idle,
                 faces_well: FacesWellState::new(),
                 detection_cache: None,
-                gpu_available: video_blur_core::blurring::infrastructure::blurrer_factory::gpu_available(),
+                gpu_context: blurrer_factory::create_gpu_context(),
                 model_cache: ModelCache::new(),
                 preview_rx: None,
                 worker_rx: None,
@@ -247,6 +249,7 @@ impl App {
                         detection_cache: self.detection_cache.clone(),
                         blur_ids,
                         model_cache: self.model_cache.clone(),
+                        gpu_context: self.gpu_context.clone(),
                     };
                     let (rx, cancel) = blur_worker::spawn(params);
                     self.worker_rx = Some(rx);
@@ -465,7 +468,7 @@ impl App {
                 &self.faces_well,
                 &current_theme,
             ),
-            Tab::Settings => tabs::settings_tab::view(&self.settings, self.gpu_available),
+            Tab::Settings => tabs::settings_tab::view(&self.settings, self.gpu_context.is_some()),
             Tab::About => tabs::about_tab::view(fs),
         };
 

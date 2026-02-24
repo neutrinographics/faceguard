@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::blurring::domain::frame_blurrer::FrameBlurrer;
 use crate::shared::frame::Frame;
 use crate::shared::region::Region;
@@ -12,16 +14,16 @@ const DEFAULT_KERNEL_SIZE: u32 = 201;
 /// Runs a two-pass separable Gaussian blur on the GPU. The entire
 /// rectangular ROI is blurred (no ellipse mask).
 pub struct GpuRectangularBlurrer {
-    ctx: GpuContext,
+    ctx: Arc<GpuContext>,
     kernel_size: u32,
 }
 
 impl GpuRectangularBlurrer {
-    pub fn new(ctx: GpuContext, kernel_size: u32) -> Self {
+    pub fn new(ctx: Arc<GpuContext>, kernel_size: u32) -> Self {
         Self { ctx, kernel_size }
     }
 
-    pub fn with_default_kernel(ctx: GpuContext) -> Self {
+    pub fn with_default_kernel(ctx: Arc<GpuContext>) -> Self {
         Self::new(ctx, DEFAULT_KERNEL_SIZE)
     }
 }
@@ -134,8 +136,8 @@ mod tests {
         }
     }
 
-    fn try_gpu_context() -> Option<GpuContext> {
-        GpuContext::new()
+    fn try_gpu_context() -> Option<Arc<GpuContext>> {
+        GpuContext::new().map(Arc::new)
     }
 
     #[test]

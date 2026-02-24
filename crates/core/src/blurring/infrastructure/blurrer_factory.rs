@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::blurring::domain::frame_blurrer::FrameBlurrer;
 
 use super::cpu_elliptical_blurrer::CpuEllipticalBlurrer;
@@ -19,7 +21,20 @@ pub enum BlurShape {
 /// blurrer; otherwise falls back to the CPU implementation. Logs which
 /// backend is selected.
 pub fn create_blurrer(shape: BlurShape, kernel_size: usize) -> Box<dyn FrameBlurrer> {
-    if let Some(ctx) = GpuContext::new() {
+    create_blurrer_with_context(shape, kernel_size, None)
+}
+
+/// Creates a blurrer using a pre-built GPU context, avoiding expensive re-initialization.
+///
+/// Pass `Some(ctx)` to reuse an existing GPU context. Pass `None` to probe for GPU
+/// and create a new context (or fall back to CPU).
+pub fn create_blurrer_with_context(
+    shape: BlurShape,
+    kernel_size: usize,
+    gpu_context: Option<Arc<GpuContext>>,
+) -> Box<dyn FrameBlurrer> {
+    let ctx = gpu_context.or_else(|| GpuContext::new().map(Arc::new));
+    if let Some(ctx) = ctx {
         log::info!(
             "Using GPU backend for {:?} blur (kernel_size={})",
             shape,
@@ -27,7 +42,9 @@ pub fn create_blurrer(shape: BlurShape, kernel_size: usize) -> Box<dyn FrameBlur
         );
         match shape {
             BlurShape::Elliptical => Box::new(GpuEllipticalBlurrer::new(ctx, kernel_size as u32)),
-            BlurShape::Rectangular => Box::new(GpuRectangularBlurrer::new(ctx, kernel_size as u32)),
+            BlurShape::Rectangular => {
+                Box::new(GpuRectangularBlurrer::new(ctx, kernel_size as u32))
+            }
         }
     } else {
         log::info!(
@@ -40,6 +57,14 @@ pub fn create_blurrer(shape: BlurShape, kernel_size: usize) -> Box<dyn FrameBlur
             BlurShape::Rectangular => Box::new(CpuRectangularBlurrer::new(kernel_size)),
         }
     }
+}
+
+/// Creates a GPU context if a GPU adapter is available.
+///
+/// The returned context can be cached and reused across blur jobs via
+/// `create_blurrer_with_context()`.
+pub fn create_gpu_context() -> Option<Arc<GpuContext>> {
+    GpuContext::new().map(Arc::new)
 }
 
 /// Returns true if a GPU adapter is available for compute shaders.

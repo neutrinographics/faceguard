@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::blurring::domain::frame_blurrer::FrameBlurrer;
 use crate::shared::frame::Frame;
 use crate::shared::region::Region;
@@ -13,16 +15,16 @@ const DEFAULT_KERNEL_SIZE: u32 = 201;
 /// Uses the Region's edge-aware ellipse geometry so the blur extends
 /// smoothly off frame edges.
 pub struct GpuEllipticalBlurrer {
-    ctx: GpuContext,
+    ctx: Arc<GpuContext>,
     kernel_size: u32,
 }
 
 impl GpuEllipticalBlurrer {
-    pub fn new(ctx: GpuContext, kernel_size: u32) -> Self {
+    pub fn new(ctx: Arc<GpuContext>, kernel_size: u32) -> Self {
         Self { ctx, kernel_size }
     }
 
-    pub fn with_default_kernel(ctx: GpuContext) -> Self {
+    pub fn with_default_kernel(ctx: Arc<GpuContext>) -> Self {
         Self::new(ctx, DEFAULT_KERNEL_SIZE)
     }
 }
@@ -138,8 +140,8 @@ mod tests {
         }
     }
 
-    fn try_gpu_context() -> Option<GpuContext> {
-        GpuContext::new()
+    fn try_gpu_context() -> Option<Arc<GpuContext>> {
+        GpuContext::new().map(Arc::new)
     }
 
     #[test]
