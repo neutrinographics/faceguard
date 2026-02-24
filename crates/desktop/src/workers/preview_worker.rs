@@ -23,7 +23,6 @@ use video_blur_core::video::infrastructure::image_file_writer::ImageFileWriter;
 use super::model_cache::ModelCache;
 
 /// Messages sent from the preview worker thread to the UI.
-#[derive(Debug, Clone)]
 pub enum PreviewMessage {
     DownloadProgress(u64, u64),
     ScanProgress(usize, usize),
@@ -33,7 +32,6 @@ pub enum PreviewMessage {
 }
 
 /// Result of a preview scan.
-#[derive(Debug, Clone)]
 pub struct PreviewResult {
     /// track_id → path to saved thumbnail JPEG
     pub crops: HashMap<u32, PathBuf>,
@@ -41,9 +39,8 @@ pub struct PreviewResult {
     pub groups: Vec<Vec<u32>>,
     /// Cached detection results: frame_index → regions
     pub detection_cache: HashMap<usize, Vec<Region>>,
-    /// Temporary directory containing crop files (keep alive)
-    #[allow(dead_code)]
-    pub temp_dir: PathBuf,
+    /// Temporary directory containing crop files (dropped = cleaned up via RAII).
+    pub temp_dir: tempfile::TempDir,
 }
 
 /// Parameters for a preview job.
@@ -162,14 +159,11 @@ fn run_preview(
     let embedding_result = embedding_path.map_err(|e| -> Box<dyn std::error::Error> { e.into() });
     let groups = group_faces(&crops, &embedding_result)?;
 
-    // Keep temp_dir alive by leaking it (we store the path, cleanup happens on new input)
-    std::mem::forget(temp_dir);
-
     let _ = tx.send(PreviewMessage::Complete(PreviewResult {
         crops,
         groups,
         detection_cache,
-        temp_dir: temp_path,
+        temp_dir,
     }));
 
     Ok(())

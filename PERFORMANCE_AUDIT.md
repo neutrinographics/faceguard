@@ -187,7 +187,7 @@ No GPU acceleration on Linux/Windows. Falls back to CPU silently.
 
 ---
 
-### 21. `gpu_available()` creates full GPU context
+### 21. ~~`gpu_available()` creates full GPU context~~
 **File**: `crates/core/src/blurring/infrastructure/blurrer_factory.rs:46`
 
 Creates Instance, Adapter, Device, Pipeline just to return a bool.
@@ -196,7 +196,7 @@ Creates Instance, Adapter, Device, Pipeline just to return a bool.
 
 ---
 
-### 22. preview_worker leaks TempDir
+### 22. ~~preview_worker leaks TempDir~~
 **File**: `crates/desktop/src/workers/preview_worker.rs:166`
 
 `std::mem::forget(temp_dir)` prevents cleanup. Files persist until process exit.
