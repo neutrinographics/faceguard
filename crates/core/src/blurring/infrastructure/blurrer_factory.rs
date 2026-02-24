@@ -44,7 +44,7 @@ pub fn create_blurrer(shape: BlurShape, kernel_size: usize) -> Box<dyn FrameBlur
 
 /// Returns true if a GPU adapter is available for compute shaders.
 pub fn gpu_available() -> bool {
-    GpuContext::new().is_some()
+    GpuContext::is_available()
 }
 
 #[cfg(test)]
