@@ -16,6 +16,7 @@ use video_blur_core::detection::infrastructure::onnx_yolo_detector::OnnxYoloDete
 use video_blur_core::detection::infrastructure::skip_frame_detector::SkipFrameDetector;
 use video_blur_core::pipeline::blur_faces_use_case::BlurFacesUseCase;
 use video_blur_core::pipeline::blur_image_use_case::BlurImageUseCase;
+use video_blur_core::pipeline::infrastructure::threaded_pipeline_executor::ThreadedPipelineExecutor;
 use video_blur_core::shared::constants::{IMAGE_EXTENSIONS, TRACKER_MAX_LOST};
 use video_blur_core::shared::region::Region;
 use video_blur_core::video::infrastructure::ffmpeg_reader::FfmpegReader;
@@ -172,6 +173,7 @@ fn run_blur(
             detector,
             blurrer,
             merger,
+            Box::new(ThreadedPipelineExecutor::new()),
             Some(params.lookahead as usize),
             params.blur_ids.clone(),
             None,

@@ -20,7 +20,7 @@ For each face: extract ROI on CPU, upload to GPU, blur with synchronous readback
 
 ---
 
-### 3. Detection blocks blur on main thread
+### 3. ~~Detection blocks blur on main thread~~
 **File**: `crates/core/src/pipeline/blur_faces_use_case.rs:131`
 
 Pipeline is: `reader_thread -> [detect THEN blur on main thread] -> writer_thread`. Detection (~30ms) and blur (~10ms) run sequentially, so the reader starves waiting for the main thread to drain the queue.

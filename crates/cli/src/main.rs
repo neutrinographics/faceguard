@@ -17,6 +17,7 @@ use video_blur_core::shared::constants::{
 };
 use video_blur_core::pipeline::blur_faces_use_case::BlurFacesUseCase;
 use video_blur_core::pipeline::blur_image_use_case::BlurImageUseCase;
+use video_blur_core::pipeline::infrastructure::threaded_pipeline_executor::ThreadedPipelineExecutor;
 use video_blur_core::pipeline::preview_faces_use_case::PreviewFacesUseCase;
 use video_blur_core::video::infrastructure::ffmpeg_reader::FfmpegReader;
 use video_blur_core::video::infrastructure::ffmpeg_writer::FfmpegWriter;
@@ -234,6 +235,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             detector,
             blurrer,
             merger,
+            Box::new(ThreadedPipelineExecutor::new()),
             Some(cli.lookahead),
             blur_ids,
             exclude_ids,
