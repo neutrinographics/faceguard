@@ -1,30 +1,25 @@
 /// ArcFace embedding-based face grouper using ONNX Runtime.
 ///
-/// Computes face embeddings via an ArcFace ONNX model, then clusters
-/// by cosine similarity using union-find.
+/// Clusters faces by cosine similarity of ArcFace embeddings. Preferred
+/// over histogram grouping when model availability and latency allow.
 use std::path::Path;
 use std::sync::Mutex;
 
 use crate::detection::domain::face_grouper::FaceGrouper;
+use crate::detection::infrastructure::math;
 
-/// Default cosine similarity threshold for grouping.
 pub const DEFAULT_THRESHOLD: f64 = 0.4;
 
-/// ArcFace model input size.
 const INPUT_SIZE: usize = 112;
-
-/// ArcFace pixel normalization: `(pixel - 127.5) / 127.5`.
 const NORM_MEAN: f32 = 127.5;
 const NORM_STD: f32 = 127.5;
 
-/// ArcFace embedding face grouper.
 pub struct EmbeddingFaceGrouper {
     session: Mutex<ort::session::Session>,
     threshold: f64,
 }
 
 impl EmbeddingFaceGrouper {
-    /// Load an ArcFace ONNX model for embedding computation.
     pub fn new(model_path: &Path, threshold: f64) -> Result<Self, Box<dyn std::error::Error>> {
         let intra_threads = std::thread::available_parallelism()
             .map(|n| n.get())
@@ -43,7 +38,6 @@ impl EmbeddingFaceGrouper {
         })
     }
 
-    /// Compute L2-normalized embedding for a single crop.
     fn embed(
         &self,
         rgb_data: &[u8],
@@ -57,13 +51,11 @@ impl EmbeddingFaceGrouper {
             .lock()
             .map_err(|e| format!("Lock poisoned: {e}"))?;
         let outputs = session.run(ort::inputs![input_value])?;
-        let output = &outputs[0];
-        let embedding_array = output.try_extract_array::<f32>()?;
+        let embedding_array = outputs[0].try_extract_array::<f32>()?;
         let embedding_slice = embedding_array
             .as_slice()
             .ok_or("Cannot get embedding slice")?;
 
-        // L2 normalize
         let mut embedding = embedding_slice.to_vec();
         l2_normalize(&mut embedding);
         Ok(embedding)
@@ -79,47 +71,32 @@ impl FaceGrouper for EmbeddingFaceGrouper {
             return Ok(Vec::new());
         }
 
-        // Compute embeddings
         let embeddings: Vec<Vec<f32>> = crops
             .iter()
             .map(|(_, data, w, h)| self.embed(data, *w, *h))
             .collect::<Result<Vec<_>, _>>()?;
 
-        // Compute cosine similarity matrix + union-find
         let n = crops.len();
         let mut parent: Vec<usize> = (0..n).collect();
 
         for i in 0..n {
             for j in (i + 1)..n {
-                let sim = cosine_similarity(&embeddings[i], &embeddings[j]);
-                if sim >= self.threshold {
-                    union(&mut parent, i, j);
+                if cosine_similarity(&embeddings[i], &embeddings[j]) >= self.threshold {
+                    math::union(&mut parent, i, j);
                 }
             }
         }
 
-        // Collect groups
-        let mut groups: std::collections::HashMap<usize, Vec<u32>> =
-            std::collections::HashMap::new();
-        for (idx, (track_id, _, _, _)) in crops.iter().enumerate() {
-            let root = find(&mut parent, idx);
-            groups.entry(root).or_default().push(*track_id);
-        }
-
-        let mut result: Vec<Vec<u32>> = groups.into_values().collect();
-        for g in &mut result {
-            g.sort();
-        }
-        result.sort_by_key(|g| g[0]);
-        Ok(result)
+        let entries: Vec<(usize, u32)> = crops
+            .iter()
+            .enumerate()
+            .map(|(idx, (track_id, _, _, _))| (idx, *track_id))
+            .collect();
+        Ok(math::collect_groups(&mut parent, &entries))
     }
 }
 
-// ---------------------------------------------------------------------------
-// Preprocessing
-// ---------------------------------------------------------------------------
-
-/// Resize crop to 112×112, normalize to `(pixel - 127.5) / 127.5`, NCHW layout.
+/// Resize crop to 112x112, normalize, NCHW layout.
 fn preprocess(rgb_data: &[u8], width: u32, height: u32) -> ndarray::Array4<f32> {
     let src_w = width as usize;
     let src_h = height as usize;
@@ -143,11 +120,6 @@ fn preprocess(rgb_data: &[u8], width: u32, height: u32) -> ndarray::Array4<f32> 
     tensor
 }
 
-// ---------------------------------------------------------------------------
-// Math utilities
-// ---------------------------------------------------------------------------
-
-/// L2-normalize a vector in-place.
 pub fn l2_normalize(v: &mut [f32]) {
     let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
     if norm > 0.0 {
@@ -157,37 +129,13 @@ pub fn l2_normalize(v: &mut [f32]) {
     }
 }
 
-/// Cosine similarity between two L2-normalized vectors (= dot product).
+/// Dot product of L2-normalized vectors equals cosine similarity.
 fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
     a.iter()
         .zip(b.iter())
         .map(|(x, y)| (*x as f64) * (*y as f64))
         .sum()
 }
-
-// ---------------------------------------------------------------------------
-// Union-Find
-// ---------------------------------------------------------------------------
-
-fn find(parent: &mut [usize], mut i: usize) -> usize {
-    while parent[i] != i {
-        parent[i] = parent[parent[i]]; // path halving
-        i = parent[i];
-    }
-    i
-}
-
-fn union(parent: &mut [usize], a: usize, b: usize) {
-    let ra = find(parent, a);
-    let rb = find(parent, b);
-    if ra != rb {
-        parent[ra] = rb;
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -212,23 +160,20 @@ mod tests {
     fn test_l2_normalize_zero_vector() {
         let mut v = vec![0.0, 0.0, 0.0];
         l2_normalize(&mut v);
-        // Should remain zero (no division by zero)
         assert_eq!(v, vec![0.0, 0.0, 0.0]);
     }
 
     #[test]
     fn test_cosine_similarity_identical() {
         let a = vec![0.6, 0.8];
-        let sim = cosine_similarity(&a, &a);
-        assert!((sim - 1.0).abs() < 1e-6);
+        assert!((cosine_similarity(&a, &a) - 1.0).abs() < 1e-6);
     }
 
     #[test]
     fn test_cosine_similarity_orthogonal() {
         let a = vec![1.0, 0.0];
         let b = vec![0.0, 1.0];
-        let sim = cosine_similarity(&a, &b);
-        assert!((sim - 0.0).abs() < 1e-6);
+        assert!((cosine_similarity(&a, &b) - 0.0).abs() < 1e-6);
     }
 
     #[test]
@@ -240,7 +185,6 @@ mod tests {
 
     #[test]
     fn test_preprocess_normalization() {
-        // All 127 → (127 - 127.5) / 127.5 ≈ -0.00392
         let data = vec![127u8; 10 * 10 * 3];
         let tensor = preprocess(&data, 10, 10);
         let val = tensor[[0, 0, 0, 0]];
@@ -250,36 +194,15 @@ mod tests {
 
     #[test]
     fn test_preprocess_normalization_max() {
-        // All 255 → (255 - 127.5) / 127.5 = 1.0
         let data = vec![255u8; 10 * 10 * 3];
         let tensor = preprocess(&data, 10, 10);
-        let val = tensor[[0, 0, 0, 0]];
-        assert!((val - 1.0).abs() < 0.01);
+        assert!((tensor[[0, 0, 0, 0]] - 1.0).abs() < 0.01);
     }
 
     #[test]
     fn test_preprocess_normalization_min() {
-        // All 0 → (0 - 127.5) / 127.5 = -1.0
         let data = vec![0u8; 10 * 10 * 3];
         let tensor = preprocess(&data, 10, 10);
-        let val = tensor[[0, 0, 0, 0]];
-        assert!((val - (-1.0)).abs() < 0.01);
-    }
-
-    #[test]
-    fn test_union_find_transitive() {
-        let mut parent = vec![0, 1, 2];
-        union(&mut parent, 0, 1);
-        union(&mut parent, 1, 2);
-        // All should be in the same group
-        assert_eq!(find(&mut parent, 0), find(&mut parent, 2));
-    }
-
-    #[test]
-    fn test_union_find_separate() {
-        let mut parent = vec![0, 1, 2, 3];
-        union(&mut parent, 0, 1);
-        union(&mut parent, 2, 3);
-        assert_ne!(find(&mut parent, 0), find(&mut parent, 2));
+        assert!((tensor[[0, 0, 0, 0]] - (-1.0)).abs() < 0.01);
     }
 }

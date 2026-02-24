@@ -40,22 +40,18 @@ pub fn resolve(
     bundled_dir: Option<&Path>,
     progress: Option<ProgressFn>,
 ) -> Result<PathBuf, ModelResolveError> {
-    // 1. Check user cache
     let cache_dir = model_cache_dir()?;
     let cached_path = cache_dir.join(name);
     if cached_path.exists() {
         return Ok(cached_path);
     }
 
-    // 2. Check bundled path
     if let Some(dir) = bundled_dir {
         let bundled_path = dir.join(name);
         if bundled_path.exists() {
             return Ok(bundled_path);
         }
     }
-
-    // 3. Download to cache
     fs::create_dir_all(&cache_dir).map_err(ModelResolveError::CacheDir)?;
     download(url, &cached_path, progress)?;
     Ok(cached_path)
@@ -110,7 +106,6 @@ fn download_inner(
     let total = response.content_length().unwrap_or(0);
     let mut downloaded: u64 = 0;
 
-    // Write to a temp file first, then rename for atomicity
     let mut file = fs::File::create(temp_path).map_err(|e| ModelResolveError::Write {
         path: temp_path.to_path_buf(),
         source: e,

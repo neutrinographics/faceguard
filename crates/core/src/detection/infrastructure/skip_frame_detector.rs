@@ -109,7 +109,6 @@ mod tests {
     struct FakeDetector {
         results: Vec<Vec<Region>>,
         call_count: usize,
-        pub call_indices: Vec<usize>,
     }
 
     impl FakeDetector {
@@ -117,14 +116,12 @@ mod tests {
             Self {
                 results,
                 call_count: 0,
-                call_indices: Vec::new(),
             }
         }
     }
 
     impl FaceDetector for FakeDetector {
-        fn detect(&mut self, frame: &Frame) -> Result<Vec<Region>, Box<dyn std::error::Error>> {
-            self.call_indices.push(frame.index());
+        fn detect(&mut self, _frame: &Frame) -> Result<Vec<Region>, Box<dyn std::error::Error>> {
             let result = self.results[self.call_count % self.results.len()].clone();
             self.call_count += 1;
             Ok(result)
@@ -152,9 +149,6 @@ mod tests {
     #[test]
     fn test_detect_interval_1_delegates_every_frame() {
         let inner = FakeDetector::new(vec![vec![region(1, 10, 20)]; 3]);
-        // We need to get the call_indices after running, so we use a shared reference trick.
-        // Actually, since FakeDetector is behind Box<dyn FaceDetector>, we can't access it.
-        // Let's use a different approach: just verify the results are returned correctly.
         let mut detector = SkipFrameDetector::new(Box::new(inner), 1).unwrap();
 
         for i in 0..3 {

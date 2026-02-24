@@ -1,7 +1,7 @@
-/// YOLO face detector using ONNX Runtime via `ort`.
+/// YOLO face detector using ONNX Runtime.
 ///
-/// Handles letterbox preprocessing, inference, NMS post-processing, ByteTrack
-/// tracking, and region building through the domain's `FaceRegionBuilder`.
+/// Pipeline: letterbox preprocess → ONNX inference → NMS → ByteTrack → region building.
+/// The detect() method orchestrates these stages for each frame.
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -12,35 +12,24 @@ use crate::shared::frame::Frame;
 use crate::shared::region::Region;
 
 use super::bytetrack_tracker::{ByteTracker, Detection as TrackerDetection};
+use super::math::bbox_iou;
 
-/// Fallback YOLO model input resolution when the model doesn't specify dimensions.
 const DEFAULT_INPUT_SIZE: u32 = 640;
-
-/// Default confidence threshold for face detection.
 pub const DEFAULT_CONFIDENCE: f64 = 0.25;
-
-/// NMS IoU threshold.
 const NMS_IOU_THRESH: f64 = 0.45;
-
-/// Number of keypoints per detection (5 landmarks × 3 values each: x, y, conf).
 const NUM_KEYPOINT_VALUES: usize = 15;
-
-/// Minimum keypoint confidence to treat a landmark as visible.
 const KEYPOINT_CONF_THRESH: f64 = 0.5;
 
-/// YOLO face detector backed by an ONNX Runtime session.
 pub struct OnnxYoloDetector {
     session: Arc<Mutex<ort::session::Session>>,
     region_builder: FaceRegionBuilder,
     tracker: ByteTracker,
     confidence: f64,
     input_size: u32,
-    /// Pre-allocated letterbox tensor reused across frames.
     letterbox_buf: ndarray::Array4<f32>,
 }
 
-/// Extract the model input resolution from an ONNX session.
-/// Falls back to `DEFAULT_INPUT_SIZE` if the shape is dynamic or unreadable.
+/// Extract the model input resolution from an ONNX session, falling back to 640.
 pub fn session_input_size(session: &ort::session::Session) -> u32 {
     session
         .inputs()
@@ -60,10 +49,6 @@ pub fn session_input_size(session: &ort::session::Session) -> u32 {
 }
 
 impl OnnxYoloDetector {
-    /// Load a YOLO ONNX model and prepare for inference.
-    ///
-    /// The input resolution is read from the model's input shape (expecting NCHW).
-    /// Falls back to 640 if the shape is dynamic or unreadable.
     pub fn new(
         model_path: &Path,
         region_builder: FaceRegionBuilder,
@@ -83,10 +68,7 @@ impl OnnxYoloDetector {
         })
     }
 
-    /// Build an ONNX Runtime session from a model file.
-    ///
-    /// This is the expensive operation that can be performed ahead of time
-    /// (e.g. at app startup) so that detector construction is instant.
+    /// Build an ONNX session ahead of time so detector construction is instant.
     pub fn build_session(
         model_path: &Path,
     ) -> Result<ort::session::Session, Box<dyn std::error::Error>> {
@@ -104,9 +86,6 @@ impl OnnxYoloDetector {
         Ok(session)
     }
 
-    /// Create a detector from a pre-built shared ONNX session.
-    ///
-    /// `input_size` should be computed via [`session_input_size()`] at build time.
     pub fn from_shared_session(
         session: Arc<Mutex<ort::session::Session>>,
         input_size: u32,
@@ -131,100 +110,41 @@ impl FaceDetector for OnnxYoloDetector {
         let fw = frame.width();
         let fh = frame.height();
 
-        // 1. Preprocess: letterbox + normalize → NCHW float32 (reuses pre-allocated buffer)
         let (scale, pad_x, pad_y) = letterbox_into(frame, self.input_size, &mut self.letterbox_buf);
+        let lb = LetterboxParams { scale, pad_x, pad_y };
+        let filtered = self.run_inference_and_nms(&lb)?;
+        let tracks = self.track(&filtered);
+        Ok(self.build_regions(&tracks, &filtered, fw, fh))
+    }
+}
 
-        // 2. Inference + parse detections (hold lock only while tensor data is needed)
+impl OnnxYoloDetector {
+    fn run_inference_and_nms(
+        &self,
+        lb: &LetterboxParams,
+    ) -> Result<Vec<RawDetection>, Box<dyn std::error::Error>> {
         let input_value = ort::value::TensorRef::from_array_view(self.letterbox_buf.view())?;
         let confidence = self.confidence;
-        let filtered = {
-            let mut session = self
-                .session
-                .lock()
-                .map_err(|e| format!("Session lock poisoned: {e}"))?;
-            let outputs = session.run(ort::inputs![input_value])?;
-            if outputs.len() == 0 {
-                return Err("YOLO model produced no outputs".into());
-            }
-            let tensor = outputs[0].try_extract_array::<f32>()?;
-            let shape = tensor.shape();
-            let data = tensor.as_slice().ok_or("Cannot get tensor slice")?;
 
-            // YOLO output shape is [1, num_features, num_detections] (transposed)
-            // or [1, num_detections, num_features]. Handle both.
-            let (num_dets, num_feats) = if shape.len() == 3 {
-                if shape[1] < shape[2] {
-                    (shape[2], shape[1])
-                } else {
-                    (shape[1], shape[2])
-                }
-            } else {
-                return Err(format!("Unexpected YOLO output shape: {shape:?}").into());
-            };
+        let mut session = self
+            .session
+            .lock()
+            .map_err(|e| format!("Session lock poisoned: {e}"))?;
+        let outputs = session.run(ort::inputs![input_value])?;
+        if outputs.len() == 0 {
+            return Err("YOLO model produced no outputs".into());
+        }
 
-            let transposed = shape.len() == 3 && shape[1] < shape[2];
+        let tensor = outputs[0].try_extract_array::<f32>()?;
+        let shape = tensor.shape();
+        let data = tensor.as_slice().ok_or("Cannot get tensor slice")?;
 
-            // 3. Parse detections directly from tensor (no full copy)
-            let feat = |det_idx: usize, feat_idx: usize| -> f32 {
-                if transposed {
-                    data[feat_idx * num_dets + det_idx]
-                } else {
-                    data[det_idx * num_feats + feat_idx]
-                }
-            };
+        let (num_dets, num_feats, transposed) = parse_output_shape(shape)?;
+        let mut raw_dets = parse_detections(data, num_dets, num_feats, transposed, confidence, lb);
+        Ok(nms(&mut raw_dets, NMS_IOU_THRESH))
+    }
 
-            let mut raw_dets = Vec::new();
-            for i in 0..num_dets {
-                if num_feats < 5 {
-                    continue;
-                }
-                let conf = feat(i, 4) as f64;
-                if conf < confidence {
-                    continue;
-                }
-
-                let cx = feat(i, 0) as f64;
-                let cy = feat(i, 1) as f64;
-                let w = feat(i, 2) as f64;
-                let h = feat(i, 3) as f64;
-
-                // Convert from letterbox coords back to original frame coords
-                let x1 = ((cx - w / 2.0) - pad_x as f64) / scale;
-                let y1 = ((cy - h / 2.0) - pad_y as f64) / scale;
-                let x2 = ((cx + w / 2.0) - pad_x as f64) / scale;
-                let y2 = ((cy + h / 2.0) - pad_y as f64) / scale;
-
-                // Parse keypoints if available, filtering by confidence
-                let keypoints = if num_feats >= 5 + NUM_KEYPOINT_VALUES {
-                    let mut pts = [(0.0f64, 0.0f64); 5];
-                    for (k, pt) in pts.iter_mut().enumerate() {
-                        let kconf = feat(i, 5 + k * 3 + 2) as f64;
-                        if kconf >= KEYPOINT_CONF_THRESH {
-                            let kx = feat(i, 5 + k * 3) as f64;
-                            let ky = feat(i, 5 + k * 3 + 1) as f64;
-                            *pt = ((kx - pad_x as f64) / scale, (ky - pad_y as f64) / scale);
-                        }
-                    }
-                    Some(pts)
-                } else {
-                    None
-                };
-
-                raw_dets.push(RawDetection {
-                    x1,
-                    y1,
-                    x2,
-                    y2,
-                    confidence: conf,
-                    keypoints,
-                });
-            }
-
-            // 4. NMS (still inside lock, but cheap compared to inference)
-            nms(&mut raw_dets, NMS_IOU_THRESH)
-        };
-
-        // 5. Track
+    fn track(&mut self, filtered: &[RawDetection]) -> Vec<super::bytetrack_tracker::Track> {
         let tracker_dets: Vec<TrackerDetection> = filtered
             .iter()
             .map(|d| TrackerDetection {
@@ -232,39 +152,134 @@ impl FaceDetector for OnnxYoloDetector {
                 score: d.confidence,
             })
             .collect();
-        let tracks = self.tracker.update(&tracker_dets);
+        self.tracker.update(&tracker_dets)
+    }
 
-        // 6. Build regions — use det_index from tracker for direct lookup
-        let mut regions = Vec::new();
-        for track in &tracks {
-            let landmarks = track
-                .det_index
-                .and_then(|i| filtered.get(i))
-                .and_then(|d| d.keypoints)
-                .map(FaceLandmarks::new);
+    fn build_regions(
+        &mut self,
+        tracks: &[super::bytetrack_tracker::Track],
+        filtered: &[RawDetection],
+        frame_w: u32,
+        frame_h: u32,
+    ) -> Vec<Region> {
+        tracks
+            .iter()
+            .map(|track| {
+                let landmarks = track
+                    .det_index
+                    .and_then(|i| filtered.get(i))
+                    .and_then(|d| d.keypoints)
+                    .map(FaceLandmarks::new);
 
-            let region = self.region_builder.build(
-                (track.bbox[0], track.bbox[1], track.bbox[2], track.bbox[3]),
-                fw,
-                fh,
-                landmarks.as_ref(),
-                Some(track.id),
-            );
-            regions.push(region);
-        }
-
-        Ok(regions)
+                self.region_builder.build(
+                    (track.bbox[0], track.bbox[1], track.bbox[2], track.bbox[3]),
+                    frame_w,
+                    frame_h,
+                    landmarks.as_ref(),
+                    Some(track.id),
+                )
+            })
+            .collect()
     }
 }
 
-// ---------------------------------------------------------------------------
-// Preprocessing
-// ---------------------------------------------------------------------------
+fn parse_output_shape(shape: &[usize]) -> Result<(usize, usize, bool), Box<dyn std::error::Error>> {
+    if shape.len() != 3 {
+        return Err(format!("Unexpected YOLO output shape: {shape:?}").into());
+    }
+    let transposed = shape[1] < shape[2];
+    let (num_dets, num_feats) = if transposed {
+        (shape[2], shape[1])
+    } else {
+        (shape[1], shape[2])
+    };
+    Ok((num_dets, num_feats, transposed))
+}
 
-/// Letterbox-resize a frame into a pre-allocated `target_size` × `target_size` tensor.
-///
-/// The caller must provide a buffer of shape `[1, 3, target_size, target_size]`.
-/// Returns `(scale, pad_x, pad_y)`.
+/// Letterbox transform parameters for mapping coordinates back to original frame space.
+struct LetterboxParams {
+    scale: f64,
+    pad_x: u32,
+    pad_y: u32,
+}
+
+impl LetterboxParams {
+    fn to_frame_x(&self, x: f64) -> f64 {
+        (x - self.pad_x as f64) / self.scale
+    }
+
+    fn to_frame_y(&self, y: f64) -> f64 {
+        (y - self.pad_y as f64) / self.scale
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn parse_detections(
+    data: &[f32],
+    num_dets: usize,
+    num_feats: usize,
+    transposed: bool,
+    confidence: f64,
+    lb: &LetterboxParams,
+) -> Vec<RawDetection> {
+    let feat = |det_idx: usize, feat_idx: usize| -> f32 {
+        if transposed {
+            data[feat_idx * num_dets + det_idx]
+        } else {
+            data[det_idx * num_feats + feat_idx]
+        }
+    };
+
+    let mut dets = Vec::new();
+    for i in 0..num_dets {
+        if num_feats < 5 {
+            continue;
+        }
+        let conf = feat(i, 4) as f64;
+        if conf < confidence {
+            continue;
+        }
+
+        let cx = feat(i, 0) as f64;
+        let cy = feat(i, 1) as f64;
+        let w = feat(i, 2) as f64;
+        let h = feat(i, 3) as f64;
+
+        let x1 = lb.to_frame_x(cx - w / 2.0);
+        let y1 = lb.to_frame_y(cy - h / 2.0);
+        let x2 = lb.to_frame_x(cx + w / 2.0);
+        let y2 = lb.to_frame_y(cy + h / 2.0);
+
+        let keypoints = parse_keypoints(&feat, i, num_feats, lb);
+
+        dets.push(RawDetection { x1, y1, x2, y2, confidence: conf, keypoints });
+    }
+    dets
+}
+
+fn parse_keypoints(
+    feat: &dyn Fn(usize, usize) -> f32,
+    det_idx: usize,
+    num_feats: usize,
+    lb: &LetterboxParams,
+) -> Option<[(f64, f64); 5]> {
+    if num_feats < 5 + NUM_KEYPOINT_VALUES {
+        return None;
+    }
+
+    let mut pts = [(0.0f64, 0.0f64); 5];
+    for (k, pt) in pts.iter_mut().enumerate() {
+        let kconf = feat(det_idx, 5 + k * 3 + 2) as f64;
+        if kconf >= KEYPOINT_CONF_THRESH {
+            let kx = feat(det_idx, 5 + k * 3) as f64;
+            let ky = feat(det_idx, 5 + k * 3 + 1) as f64;
+            *pt = (lb.to_frame_x(kx), lb.to_frame_y(ky));
+        }
+    }
+    Some(pts)
+}
+
+/// Letterbox-resize into a pre-allocated NCHW tensor.
 fn letterbox_into(
     frame: &Frame,
     target_size: u32,
@@ -280,15 +295,13 @@ fn letterbox_into(
     let pad_x = (target_size - new_w) / 2;
     let pad_y = (target_size - new_h) / 2;
 
-    // Fill entire buffer with 114/255 gray (YOLO convention)
-    let gray = 114.0f32 / 255.0;
-    buf.fill(gray);
+    // 114/255 gray is the YOLO letterbox convention
+    buf.fill(114.0f32 / 255.0);
 
-    let src = frame.as_ndarray(); // [H, W, C] u8
+    let src = frame.as_ndarray();
     let src_h = frame.height() as usize;
     let src_w = frame.width() as usize;
 
-    // Nearest-neighbor resize + copy into padded region
     for y in 0..new_h as usize {
         let src_y = ((y as f64 / scale) as usize).min(src_h - 1);
         for x in 0..new_w as usize {
@@ -304,9 +317,6 @@ fn letterbox_into(
     (scale, pad_x, pad_y)
 }
 
-/// Letterbox-resize a frame to `target_size` × `target_size` (allocating variant for tests).
-///
-/// Returns `(NCHW float32 tensor, scale, pad_x, pad_y)`.
 #[cfg(test)]
 fn letterbox(frame: &Frame, target_size: u32) -> (ndarray::Array4<f32>, f64, u32, u32) {
     let s = target_size as usize;
@@ -314,10 +324,6 @@ fn letterbox(frame: &Frame, target_size: u32) -> (ndarray::Array4<f32>, f64, u32
     let (scale, pad_x, pad_y) = letterbox_into(frame, target_size, &mut buf);
     (buf, scale, pad_x, pad_y)
 }
-
-// ---------------------------------------------------------------------------
-// NMS
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug)]
 struct RawDetection {
@@ -329,7 +335,6 @@ struct RawDetection {
     keypoints: Option<[(f64, f64); 5]>,
 }
 
-/// Greedy NMS: sort by confidence descending, suppress overlapping boxes.
 fn nms(dets: &mut [RawDetection], iou_thresh: f64) -> Vec<RawDetection> {
     dets.sort_by(|a, b| {
         b.confidence
@@ -349,11 +354,11 @@ fn nms(dets: &mut [RawDetection], iou_thresh: f64) -> Vec<RawDetection> {
             if suppressed[j] {
                 continue;
             }
-            let iou = bbox_iou(
+            if bbox_iou(
                 &[dets[i].x1, dets[i].y1, dets[i].x2, dets[i].y2],
                 &[dets[j].x1, dets[j].y1, dets[j].x2, dets[j].y2],
-            );
-            if iou > iou_thresh {
+            ) > iou_thresh
+            {
                 suppressed[j] = true;
             }
         }
@@ -361,35 +366,12 @@ fn nms(dets: &mut [RawDetection], iou_thresh: f64) -> Vec<RawDetection> {
     keep
 }
 
-fn bbox_iou(a: &[f64; 4], b: &[f64; 4]) -> f64 {
-    let x1 = a[0].max(b[0]);
-    let y1 = a[1].max(b[1]);
-    let x2 = a[2].min(b[2]);
-    let y2 = a[3].min(b[3]);
-
-    let inter = (x2 - x1).max(0.0) * (y2 - y1).max(0.0);
-    if inter == 0.0 {
-        return 0.0;
-    }
-    let area_a = (a[2] - a[0]) * (a[3] - a[1]);
-    let area_b = (b[2] - b[0]) * (b[3] - b[1]);
-    inter / (area_a + area_b - inter)
-}
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_letterbox_preserves_aspect_ratio() {
-        // 200x100 frame → letterbox to 640x640
-        // Scale = min(640/200, 640/100) = min(3.2, 6.4) = 3.2
-        // new_w = 640, new_h = 320
-        // pad_x = 0, pad_y = 160
         let data = vec![128u8; 200 * 100 * 3];
         let frame = Frame::new(data, 200, 100, 3, 0);
         let (tensor, scale, pad_x, pad_y) = letterbox(&frame, 640);
@@ -414,21 +396,17 @@ mod tests {
 
     #[test]
     fn test_letterbox_values_normalized() {
-        // Use a wide frame so there's vertical padding
         let data = vec![255u8; 100 * 50 * 3];
         let frame = Frame::new(data, 100, 50, 3, 0);
         let (tensor, _, pad_x, pad_y) = letterbox(&frame, 640);
 
-        // Wide frame: scale = 640/100 = 6.4, new_w=640, new_h=320, pad_y=160
         assert_eq!(pad_x, 0);
         assert!(pad_y > 0);
 
-        // Check a pixel in the image region is ~1.0
         let y = pad_y as usize + 1;
         let x = pad_x as usize + 1;
         assert!((tensor[[0, 0, y, x]] - 1.0).abs() < 0.01);
 
-        // Check a pad pixel (top-left, outside image region) is ~114/255
         let pad_val = 114.0 / 255.0;
         assert!((tensor[[0, 0, 0, 0]] - pad_val).abs() < 0.01);
     }
@@ -436,22 +414,8 @@ mod tests {
     #[test]
     fn test_nms_suppresses_overlapping() {
         let mut dets = vec![
-            RawDetection {
-                x1: 0.0,
-                y1: 0.0,
-                x2: 100.0,
-                y2: 100.0,
-                confidence: 0.9,
-                keypoints: None,
-            },
-            RawDetection {
-                x1: 5.0,
-                y1: 5.0,
-                x2: 105.0,
-                y2: 105.0,
-                confidence: 0.8,
-                keypoints: None,
-            },
+            RawDetection { x1: 0.0, y1: 0.0, x2: 100.0, y2: 100.0, confidence: 0.9, keypoints: None },
+            RawDetection { x1: 5.0, y1: 5.0, x2: 105.0, y2: 105.0, confidence: 0.8, keypoints: None },
         ];
         let kept = nms(&mut dets, 0.3);
         assert_eq!(kept.len(), 1);
@@ -461,22 +425,8 @@ mod tests {
     #[test]
     fn test_nms_keeps_non_overlapping() {
         let mut dets = vec![
-            RawDetection {
-                x1: 0.0,
-                y1: 0.0,
-                x2: 50.0,
-                y2: 50.0,
-                confidence: 0.9,
-                keypoints: None,
-            },
-            RawDetection {
-                x1: 200.0,
-                y1: 200.0,
-                x2: 250.0,
-                y2: 250.0,
-                confidence: 0.8,
-                keypoints: None,
-            },
+            RawDetection { x1: 0.0, y1: 0.0, x2: 50.0, y2: 50.0, confidence: 0.9, keypoints: None },
+            RawDetection { x1: 200.0, y1: 200.0, x2: 250.0, y2: 250.0, confidence: 0.8, keypoints: None },
         ];
         let kept = nms(&mut dets, 0.3);
         assert_eq!(kept.len(), 2);
@@ -485,32 +435,16 @@ mod tests {
     #[test]
     fn test_nms_empty_input() {
         let mut dets: Vec<RawDetection> = Vec::new();
-        let kept = nms(&mut dets, 0.3);
-        assert!(kept.is_empty());
+        assert!(nms(&mut dets, 0.3).is_empty());
     }
 
     #[test]
     fn test_nms_confidence_ordering() {
         let mut dets = vec![
-            RawDetection {
-                x1: 0.0,
-                y1: 0.0,
-                x2: 100.0,
-                y2: 100.0,
-                confidence: 0.5,
-                keypoints: None,
-            },
-            RawDetection {
-                x1: 2.0,
-                y1: 2.0,
-                x2: 102.0,
-                y2: 102.0,
-                confidence: 0.9,
-                keypoints: None,
-            },
+            RawDetection { x1: 0.0, y1: 0.0, x2: 100.0, y2: 100.0, confidence: 0.5, keypoints: None },
+            RawDetection { x1: 2.0, y1: 2.0, x2: 102.0, y2: 102.0, confidence: 0.9, keypoints: None },
         ];
         let kept = nms(&mut dets, 0.3);
-        // Higher confidence (0.9) should win
         assert_eq!(kept.len(), 1);
         assert!((kept[0].confidence - 0.9).abs() < 1e-9);
     }

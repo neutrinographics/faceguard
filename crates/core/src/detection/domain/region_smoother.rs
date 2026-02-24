@@ -17,7 +17,6 @@ pub struct RegionSmoother {
     state: HashMap<u32, SmoothParams>,
 }
 
-/// Default EMA smoothing factor.
 pub const DEFAULT_ALPHA: f64 = 0.6;
 
 impl RegionSmoother {

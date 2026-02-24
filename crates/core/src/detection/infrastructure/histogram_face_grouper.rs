@@ -2,17 +2,15 @@
 ///
 /// A fast fallback grouper that compares face crops by their color
 /// distribution using 2D Hue-Saturation histograms with Pearson correlation.
-/// No ML model required.
+/// No ML model required — useful when ArcFace is unavailable.
 use crate::detection::domain::face_grouper::FaceGrouper;
+use crate::detection::infrastructure::math;
 
-/// Default correlation threshold for grouping.
 pub const DEFAULT_THRESHOLD: f64 = 0.7;
 
-/// Histogram bins per channel.
 const HUE_BINS: usize = 32;
 const SAT_BINS: usize = 32;
 
-/// HSV histogram face grouper.
 pub struct HistogramFaceGrouper {
     threshold: f64,
 }
@@ -38,47 +36,31 @@ impl FaceGrouper for HistogramFaceGrouper {
             return Ok(Vec::new());
         }
 
-        // Compute histogram for each crop
         let histograms: Vec<Vec<f64>> = crops
             .iter()
             .map(|(_, data, w, h)| compute_histogram(data, *w, *h))
             .collect();
 
-        // Union-find clustering
         let n = crops.len();
         let mut parent: Vec<usize> = (0..n).collect();
 
         for i in 0..n {
             for j in (i + 1)..n {
-                let sim = pearson_correlation(&histograms[i], &histograms[j]);
-                if sim >= self.threshold {
-                    union(&mut parent, i, j);
+                if pearson_correlation(&histograms[i], &histograms[j]) >= self.threshold {
+                    math::union(&mut parent, i, j);
                 }
             }
         }
 
-        // Collect groups
-        let mut groups: std::collections::HashMap<usize, Vec<u32>> =
-            std::collections::HashMap::new();
-        for (idx, (track_id, _, _, _)) in crops.iter().enumerate() {
-            let root = find(&mut parent, idx);
-            groups.entry(root).or_default().push(*track_id);
-        }
-
-        let mut result: Vec<Vec<u32>> = groups.into_values().collect();
-        for g in &mut result {
-            g.sort();
-        }
-        result.sort_by_key(|g| g[0]);
-        Ok(result)
+        let entries: Vec<(usize, u32)> = crops
+            .iter()
+            .enumerate()
+            .map(|(idx, (track_id, _, _, _))| (idx, *track_id))
+            .collect();
+        Ok(math::collect_groups(&mut parent, &entries))
     }
 }
 
-// ---------------------------------------------------------------------------
-// HSV conversion + histogram computation
-// ---------------------------------------------------------------------------
-
-/// Convert RGB to HSV and compute a normalized 2D Hue-Saturation histogram.
 fn compute_histogram(rgb_data: &[u8], width: u32, height: u32) -> Vec<f64> {
     let num_pixels = (width * height) as usize;
     let mut hist = vec![0.0f64; HUE_BINS * SAT_BINS];
@@ -95,16 +77,13 @@ fn compute_histogram(rgb_data: &[u8], width: u32, height: u32) -> Vec<f64> {
 
         let (h, s, _v) = rgb_to_hsv(r, g, b);
 
-        // Hue: [0, 360) → bin [0, HUE_BINS)
         let h_bin = ((h / 360.0) * HUE_BINS as f64).min(HUE_BINS as f64 - 1.0) as usize;
-        // Saturation: [0, 1] → bin [0, SAT_BINS)
         let s_bin = (s * SAT_BINS as f64).min(SAT_BINS as f64 - 1.0) as usize;
 
         hist[h_bin * SAT_BINS + s_bin] += 1.0;
         count += 1;
     }
 
-    // Normalize
     if count > 0 {
         let total = count as f64;
         for v in &mut hist {
@@ -115,14 +94,12 @@ fn compute_histogram(rgb_data: &[u8], width: u32, height: u32) -> Vec<f64> {
     hist
 }
 
-/// Convert RGB [0,1] to HSV. H in [0,360), S and V in [0,1].
 fn rgb_to_hsv(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
     let max = r.max(g).max(b);
     let min = r.min(g).min(b);
     let delta = max - min;
 
     let v = max;
-
     let s = if max > 0.0 { delta / max } else { 0.0 };
 
     let h = if delta == 0.0 {
@@ -140,11 +117,10 @@ fn rgb_to_hsv(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
     (h, s, v)
 }
 
-// ---------------------------------------------------------------------------
-// Pearson correlation
-// ---------------------------------------------------------------------------
-
-/// Pearson correlation coefficient between two histograms.
+/// Pearson correlation coefficient.
+///
+/// Returns 1.0 when both inputs have zero variance (identical distributions),
+/// and 0.0 when only one has zero variance (undefined, treated as uncorrelated).
 fn pearson_correlation(a: &[f64], b: &[f64]) -> f64 {
     let n = a.len().min(b.len()) as f64;
     if n == 0.0 {
@@ -168,8 +144,6 @@ fn pearson_correlation(a: &[f64], b: &[f64]) -> f64 {
 
     let denom = (var_a * var_b).sqrt();
     if denom < f64::EPSILON {
-        // Both zero variance means identical distributions → perfect correlation.
-        // One zero, one non-zero → undefined, treat as uncorrelated.
         return if var_a < f64::EPSILON && var_b < f64::EPSILON {
             1.0
         } else {
@@ -179,30 +153,6 @@ fn pearson_correlation(a: &[f64], b: &[f64]) -> f64 {
 
     cov / denom
 }
-
-// ---------------------------------------------------------------------------
-// Union-Find
-// ---------------------------------------------------------------------------
-
-fn find(parent: &mut [usize], mut i: usize) -> usize {
-    while parent[i] != i {
-        parent[i] = parent[parent[i]]; // path halving
-        i = parent[i];
-    }
-    i
-}
-
-fn union(parent: &mut [usize], a: usize, b: usize) {
-    let ra = find(parent, a);
-    let rb = find(parent, b);
-    if ra != rb {
-        parent[ra] = rb;
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -221,8 +171,7 @@ mod tests {
     #[test]
     fn test_empty_input_returns_empty() {
         let grouper = HistogramFaceGrouper::new(0.7);
-        let result = grouper.group(&[]).unwrap();
-        assert!(result.is_empty());
+        assert!(grouper.group(&[]).unwrap().is_empty());
     }
 
     #[test]
@@ -270,10 +219,9 @@ mod tests {
 
     #[test]
     fn test_custom_threshold_very_high() {
-        // With threshold=0.999, distinctly different colors should separate
         let grouper = HistogramFaceGrouper::new(0.999);
-        let crop_a = solid_rgb(255, 0, 0, 50, 50); // pure red
-        let crop_b = solid_rgb(0, 255, 0, 50, 50); // pure green
+        let crop_a = solid_rgb(255, 0, 0, 50, 50);
+        let crop_b = solid_rgb(0, 255, 0, 50, 50);
         let result = grouper
             .group(&[(1, &crop_a, 50, 50), (2, &crop_b, 50, 50)])
             .unwrap();
@@ -295,7 +243,7 @@ mod tests {
     #[test]
     fn test_rgb_to_hsv_red() {
         let (h, s, v) = rgb_to_hsv(1.0, 0.0, 0.0);
-        assert!((h - 0.0).abs() < 1.0); // ~0 degrees
+        assert!((h - 0.0).abs() < 1.0);
         assert!((s - 1.0).abs() < 0.01);
         assert!((v - 1.0).abs() < 0.01);
     }
@@ -318,49 +266,27 @@ mod tests {
 
     #[test]
     fn test_rgb_to_hsv_white() {
-        let (h, s, v) = rgb_to_hsv(1.0, 1.0, 1.0);
-        assert_eq!(s, 0.0); // achromatic
+        let (_h, s, v) = rgb_to_hsv(1.0, 1.0, 1.0);
+        assert_eq!(s, 0.0);
         assert!((v - 1.0).abs() < 0.01);
-        let _ = h; // hue is undefined for achromatic
     }
 
     #[test]
     fn test_pearson_identical() {
         let a = vec![0.1, 0.2, 0.3, 0.4];
-        let r = pearson_correlation(&a, &a);
-        assert!((r - 1.0).abs() < 1e-9);
+        assert!((pearson_correlation(&a, &a) - 1.0).abs() < 1e-9);
     }
 
     #[test]
     fn test_pearson_uncorrelated() {
-        // Flat vs one-hot — flat has zero variance, one-hot has non-zero variance
         let a = vec![0.25, 0.25, 0.25, 0.25];
         let b = vec![1.0, 0.0, 0.0, 0.0];
-        let r = pearson_correlation(&a, &b);
-        // One zero variance, one non-zero → treated as uncorrelated (0.0)
-        assert!((r - 0.0).abs() < 1e-9);
+        assert!((pearson_correlation(&a, &b) - 0.0).abs() < 1e-9);
     }
 
     #[test]
     fn test_pearson_both_zero_variance() {
-        // Both flat → identical distributions → perfect correlation (1.0)
         let a = vec![0.25, 0.25, 0.25, 0.25];
-        let r = pearson_correlation(&a, &a);
-        assert!((r - 1.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn test_union_find_basic() {
-        let mut parent = vec![0, 1, 2, 3];
-        union(&mut parent, 0, 1);
-        assert_eq!(find(&mut parent, 0), find(&mut parent, 1));
-
-        union(&mut parent, 2, 3);
-        assert_eq!(find(&mut parent, 2), find(&mut parent, 3));
-
-        assert_ne!(find(&mut parent, 0), find(&mut parent, 2));
-
-        union(&mut parent, 1, 3);
-        assert_eq!(find(&mut parent, 0), find(&mut parent, 3));
+        assert!((pearson_correlation(&a, &a) - 1.0).abs() < 1e-9);
     }
 }

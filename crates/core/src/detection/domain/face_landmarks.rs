@@ -1,20 +1,18 @@
-/// 5-point face landmarks with weighted centroid and profile detection.
-///
-/// Landmark indices: 0=left_eye, 1=right_eye, 2=nose, 3=left_mouth, 4=right_mouth.
-/// Weights: eyes=2x, nose=3x, mouth=1x — emphasizes nose for stable centering.
+//! 5-point face landmarks with weighted centroid and profile detection.
+//!
+//! Weights emphasize nose (3x) over eyes (2x) and mouth (1x) for stable centering,
+//! since nose position is the most reliable anchor across head rotations.
+
 const LEFT_EYE: usize = 0;
 const RIGHT_EYE: usize = 1;
 const NOSE: usize = 2;
-#[allow(dead_code)]
-const LEFT_MOUTH: usize = 3;
-#[allow(dead_code)]
-const RIGHT_MOUTH: usize = 4;
 
+/// Landmark weights: [left_eye, right_eye, nose, left_mouth, right_mouth].
 const WEIGHTS: [f64; 5] = [2.0, 2.0, 3.0, 1.0, 1.0];
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FaceLandmarks {
-    /// 5 points as (x, y) pairs. A point with x <= 0 is considered invisible.
+    /// Points with x <= 0 are treated as invisible.
     points: [(f64, f64); 5],
 }
 
@@ -27,16 +25,11 @@ impl FaceLandmarks {
         &self.points
     }
 
-    /// Whether any landmark is visible (x > 0).
     pub fn has_visible(&self) -> bool {
         self.points.iter().any(|(x, _)| *x > 0.0)
     }
 
-    /// Weighted centroid of visible landmarks.
-    ///
-    /// Weights: left_eye=2, right_eye=2, nose=3, left_mouth=1, right_mouth=1.
-    /// Only visible landmarks (x > 0) are included.
-    /// Returns an error if no landmarks are visible.
+    /// Weighted centroid of visible landmarks (x > 0).
     pub fn center(&self) -> Result<(f64, f64), &'static str> {
         let mut wx_sum = 0.0;
         let mut wy_sum = 0.0;
@@ -58,10 +51,10 @@ impl FaceLandmarks {
         Ok((wx_sum / w_sum, wy_sum / w_sum))
     }
 
-    /// Profile ratio: 0.0 = frontal, 1.0 = full profile.
+    /// How much the face is turned: 0.0 = frontal, 1.0 = full profile.
     ///
     /// Measures nose offset from eye midpoint relative to eye span.
-    /// Returns 0.0 if required landmarks (nose, both eyes) are not visible.
+    /// Returns 0.0 when required landmarks are not visible.
     pub fn profile_ratio(&self) -> f64 {
         let nose = self.points[NOSE];
         let left_eye = self.points[LEFT_EYE];
