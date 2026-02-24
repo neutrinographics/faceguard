@@ -2,6 +2,19 @@ use std::sync::{Arc, Mutex};
 
 use wgpu::{self};
 
+/// Descriptor for a single region to blur in a batch.
+pub struct RoiDescriptor {
+    pub pixels: Vec<u32>,
+    pub width: u32,
+    pub height: u32,
+    pub kernel_size: u32,
+    pub ellipse_cx: f32,
+    pub ellipse_cy: f32,
+    pub ellipse_a: f32,
+    pub ellipse_b: f32,
+    pub use_ellipse: bool,
+}
+
 /// Shared GPU context for blur operations.
 ///
 /// Holds the wgpu device, queue, shader module, and pipeline so they
@@ -49,6 +62,9 @@ struct CachedBuffers {
     staging: wgpu::Buffer,
     params_h: wgpu::Buffer,
     params_v: wgpu::Buffer,
+    /// Large staging buffer for batch readback (sum of all ROI sizes).
+    batch_staging: Option<wgpu::Buffer>,
+    batch_staging_capacity: usize,
 }
 
 const INITIAL_CAPACITY: usize = 512 * 512;
@@ -205,6 +221,8 @@ impl GpuContext {
             staging,
             params_h,
             params_v,
+            batch_staging: None,
+            batch_staging_capacity: 0,
         });
 
         Some(Self {
@@ -228,8 +246,7 @@ impl GpuContext {
         .is_some()
     }
 
-    /// Run a two-pass blur on an ROI. `pixels` is packed RGBA u32 data.
-    /// Returns the blurred pixel data as packed RGBA u32.
+    /// Run a two-pass blur on an ROI. Convenience wrapper around `blur_rois`.
     #[allow(clippy::too_many_arguments)]
     pub fn blur_roi(
         &self,
@@ -243,148 +260,223 @@ impl GpuContext {
         ellipse_b: f32,
         use_ellipse: bool,
     ) -> Vec<u32> {
-        let pixel_count = (width * height) as usize;
-        let buf_size = (pixel_count * 4) as u64;
-        let kernel_radius = kernel_size / 2;
-        let sigma = kernel_size as f32 / 6.0;
-
-        let mut cache = self.buffers.lock().unwrap();
-
-        // Grow buffers if needed (never shrink).
-        if pixel_count > cache.capacity {
-            let (inp, out, orig, stg) = make_pixel_buffers(&self.device, pixel_count);
-            cache.input = inp;
-            cache.output = out;
-            cache.original = orig;
-            cache.staging = stg;
-            cache.capacity = pixel_count;
-        }
-
-        // Upload pixel data
-        self.queue
-            .write_buffer(&cache.input, 0, bytemuck::cast_slice(pixels));
-        self.queue
-            .write_buffer(&cache.original, 0, bytemuck::cast_slice(pixels));
-
-        // Write params for both passes
-        let params_h = GpuBlurParams {
+        let roi = RoiDescriptor {
+            pixels: pixels.to_vec(),
             width,
             height,
-            kernel_radius,
-            sigma,
+            kernel_size,
             ellipse_cx,
             ellipse_cy,
             ellipse_a,
             ellipse_b,
-            use_ellipse: if use_ellipse { 1 } else { 0 },
-            direction: 0,
-            _pad0: 0,
-            _pad1: 0,
+            use_ellipse,
         };
-        self.queue
-            .write_buffer(&cache.params_h, 0, bytemuck::bytes_of(&params_h));
+        let mut results = self.blur_rois(&[roi]);
+        results.remove(0)
+    }
 
-        let params_v = GpuBlurParams {
-            direction: 1,
-            ..params_h
-        };
-        self.queue
-            .write_buffer(&cache.params_v, 0, bytemuck::bytes_of(&params_v));
-
-        // Bind groups for each pass
-        let bg_h = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("bg-h"),
-            layout: &self.bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: cache.params_h.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: cache.input.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: cache.output.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: cache.original.as_entire_binding(),
-                },
-            ],
-        });
-
-        let bg_v = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("bg-v"),
-            layout: &self.bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: cache.params_v.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: cache.input.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: cache.output.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: cache.original.as_entire_binding(),
-                },
-            ],
-        });
-
-        let workgroups_x = width.div_ceil(16);
-        let workgroups_y = height.div_ceil(16);
-
-        // Single encoder: pass0 → copy(output→input) → pass1 → copy(output→staging)
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("blur-encoder"),
-            });
-
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("horizontal"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &bg_h, &[]);
-            pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
+    /// Batch-blur multiple ROIs with a single GPU readback.
+    ///
+    /// Each ROI is processed through the two-pass blur pipeline. All results
+    /// are collected into a single staging buffer and read back with one
+    /// `device.poll(Wait)` call, eliminating per-region synchronous stalls.
+    pub fn blur_rois(&self, rois: &[RoiDescriptor]) -> Vec<Vec<u32>> {
+        if rois.is_empty() {
+            return vec![];
         }
 
-        encoder.copy_buffer_to_buffer(&cache.output, 0, &cache.input, 0, buf_size);
+        let mut cache = self.buffers.lock().unwrap();
 
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("vertical"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &bg_v, &[]);
-            pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
+        // Find max ROI size and total staging bytes needed.
+        let max_pixels = rois
+            .iter()
+            .map(|r| (r.width * r.height) as usize)
+            .max()
+            .unwrap_or(0);
+        let total_staging_bytes: u64 = rois
+            .iter()
+            .map(|r| (r.width as u64) * (r.height as u64) * 4)
+            .sum();
+
+        // Grow pixel buffers if needed (never shrink).
+        if max_pixels > cache.capacity {
+            let (inp, out, orig, stg) = make_pixel_buffers(&self.device, max_pixels);
+            cache.input = inp;
+            cache.output = out;
+            cache.original = orig;
+            cache.staging = stg;
+            cache.capacity = max_pixels;
         }
 
-        encoder.copy_buffer_to_buffer(&cache.output, 0, &cache.staging, 0, buf_size);
+        // Grow batch staging buffer if needed.
+        let total_staging_usize = total_staging_bytes as usize;
+        if total_staging_usize > cache.batch_staging_capacity || cache.batch_staging.is_none() {
+            cache.batch_staging = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("batch-staging"),
+                size: total_staging_bytes,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+            cache.batch_staging_capacity = total_staging_usize;
+        }
 
-        self.queue.submit(Some(encoder.finish()));
+        // Process each ROI: upload, encode, submit (but don't poll yet).
+        let mut offsets: Vec<(u64, usize)> = Vec::with_capacity(rois.len());
+        let mut staging_offset: u64 = 0;
 
-        // Synchronous readback
-        let slice = cache.staging.slice(..buf_size);
+        for roi in rois {
+            let pixel_count = (roi.width * roi.height) as usize;
+            let buf_size = (pixel_count * 4) as u64;
+            let kernel_radius = roi.kernel_size / 2;
+            let sigma = roi.kernel_size as f32 / 6.0;
+
+            // Upload pixel data
+            self.queue
+                .write_buffer(&cache.input, 0, bytemuck::cast_slice(&roi.pixels));
+            self.queue
+                .write_buffer(&cache.original, 0, bytemuck::cast_slice(&roi.pixels));
+
+            // Write params
+            let params_h = GpuBlurParams {
+                width: roi.width,
+                height: roi.height,
+                kernel_radius,
+                sigma,
+                ellipse_cx: roi.ellipse_cx,
+                ellipse_cy: roi.ellipse_cy,
+                ellipse_a: roi.ellipse_a,
+                ellipse_b: roi.ellipse_b,
+                use_ellipse: if roi.use_ellipse { 1 } else { 0 },
+                direction: 0,
+                _pad0: 0,
+                _pad1: 0,
+            };
+            self.queue
+                .write_buffer(&cache.params_h, 0, bytemuck::bytes_of(&params_h));
+
+            let params_v = GpuBlurParams {
+                direction: 1,
+                ..params_h
+            };
+            self.queue
+                .write_buffer(&cache.params_v, 0, bytemuck::bytes_of(&params_v));
+
+            // Bind groups
+            let bg_h = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("bg-h"),
+                layout: &self.bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: cache.params_h.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: cache.input.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: cache.output.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: cache.original.as_entire_binding(),
+                    },
+                ],
+            });
+
+            let bg_v = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("bg-v"),
+                layout: &self.bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: cache.params_v.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: cache.input.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: cache.output.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: cache.original.as_entire_binding(),
+                    },
+                ],
+            });
+
+            let workgroups_x = roi.width.div_ceil(16);
+            let workgroups_y = roi.height.div_ceil(16);
+
+            // Encode blur passes + copy to batch staging
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("blur-encoder"),
+                });
+
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("horizontal"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.pipeline);
+                pass.set_bind_group(0, &bg_h, &[]);
+                pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
+            }
+
+            encoder.copy_buffer_to_buffer(&cache.output, 0, &cache.input, 0, buf_size);
+
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("vertical"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.pipeline);
+                pass.set_bind_group(0, &bg_v, &[]);
+                pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
+            }
+
+            // Copy result to batch staging at this ROI's offset
+            encoder.copy_buffer_to_buffer(
+                &cache.output,
+                0,
+                cache.batch_staging.as_ref().unwrap(),
+                staging_offset,
+                buf_size,
+            );
+
+            // Submit this ROI's work (so next ROI's write_buffer won't overwrite)
+            self.queue.submit(Some(encoder.finish()));
+
+            offsets.push((staging_offset, pixel_count));
+            staging_offset += buf_size;
+        }
+
+        // Single synchronous readback for all ROIs
+        let batch_buf = cache.batch_staging.as_ref().unwrap();
+        let slice = batch_buf.slice(..total_staging_bytes);
         slice.map_async(wgpu::MapMode::Read, |_| {});
         self.device.poll(wgpu::Maintain::Wait);
 
         let mapped = slice.get_mapped_range();
-        let result: Vec<u32> = bytemuck::cast_slice(&mapped).to_vec();
-        drop(mapped);
-        cache.staging.unmap();
+        let all_data: &[u32] = bytemuck::cast_slice(&mapped);
 
-        result
+        let results: Vec<Vec<u32>> = offsets
+            .iter()
+            .map(|(offset, count)| {
+                let start = (*offset as usize) / 4;
+                all_data[start..start + count].to_vec()
+            })
+            .collect();
+
+        drop(mapped);
+        batch_buf.unmap();
+
+        results
     }
 }
 
@@ -413,5 +505,49 @@ mod tests {
         let large: Vec<u32> = vec![0x00000000u32; 8 * 8];
         let result = ctx.blur_roi(&large, 8, 8, 3, 4.0, 4.0, 4.0, 4.0, false);
         assert_eq!(result.len(), 8 * 8);
+    }
+
+    #[test]
+    fn test_blur_rois_batch_matches_individual() {
+        let Some(ctx) = GpuContext::new() else {
+            return;
+        };
+        let pixels_a: Vec<u32> = vec![0x00FF0000u32; 4 * 4];
+        let pixels_b: Vec<u32> = vec![0x0000FF00u32; 6 * 6];
+
+        // Individual calls
+        let single_a = ctx.blur_roi(&pixels_a, 4, 4, 3, 2.0, 2.0, 2.0, 2.0, false);
+        let single_b = ctx.blur_roi(&pixels_b, 6, 6, 3, 3.0, 3.0, 3.0, 3.0, false);
+
+        // Batch call
+        let rois = vec![
+            RoiDescriptor {
+                pixels: pixels_a,
+                width: 4,
+                height: 4,
+                kernel_size: 3,
+                ellipse_cx: 2.0,
+                ellipse_cy: 2.0,
+                ellipse_a: 2.0,
+                ellipse_b: 2.0,
+                use_ellipse: false,
+            },
+            RoiDescriptor {
+                pixels: pixels_b,
+                width: 6,
+                height: 6,
+                kernel_size: 3,
+                ellipse_cx: 3.0,
+                ellipse_cy: 3.0,
+                ellipse_a: 3.0,
+                ellipse_b: 3.0,
+                use_ellipse: false,
+            },
+        ];
+        let batch = ctx.blur_rois(&rois);
+
+        assert_eq!(batch.len(), 2);
+        assert_eq!(batch[0], single_a, "batch ROI 0 must match individual");
+        assert_eq!(batch[1], single_b, "batch ROI 1 must match individual");
     }
 }

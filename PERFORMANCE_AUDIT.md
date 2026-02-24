@@ -2,7 +2,7 @@
 
 ## HIGH Impact
 
-### 1. GPU buffers recreated per region per frame
+### 1. ~~GPU buffers recreated per region per frame~~
 **File**: `crates/core/src/blurring/infrastructure/gpu_context.rs:157`
 
 4 GPU buffers + 2 params buffers + 2 bind groups + 3 command encoders created and destroyed per face per frame. With 3 faces at 30fps, that's ~360 buffer creations/second.
@@ -11,7 +11,7 @@
 
 ---
 
-### 2. GPU sync round-trips per region
+### 2. ~~GPU sync round-trips per region~~
 **File**: `crates/core/src/blurring/infrastructure/gpu_elliptical_blurrer.rs:44`
 
 For each face: extract ROI on CPU, upload to GPU, blur with synchronous readback (`device.poll(Maintain::Wait)`), download, unpack. CPU stalls waiting for GPU; GPU idles during CPU work.
@@ -122,7 +122,7 @@ For kernel_radius=100, each pixel computes 201 `exp()` calls. For a 512x512 regi
 
 ---
 
-### 14. Three queue.submit() calls per region
+### 14. ~~Three queue.submit() calls per region~~
 **File**: `crates/core/src/blurring/infrastructure/gpu_context.rs:254,265,332`
 
 Horizontal blur, buffer copy, and vertical blur each get their own submit. 3 submits per face = 9 per frame with 3 faces.
