@@ -206,7 +206,8 @@ fn create_video_encoder(
     }
 
     let mut opts = ffmpeg_next::Dictionary::new();
-    opts.set("crf", &crf.to_string());
+    opts.set("preset", "medium");
+    opts.set("crf", &crf.max(1).to_string());
     let encoder = encoder_ctx.open_with(opts)?;
     ost.set_parameters(&encoder);
 
