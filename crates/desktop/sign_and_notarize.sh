@@ -77,10 +77,53 @@ mkdir -p "$DMG_STAGING"
 cp -R "$APP_PATH" "$DMG_STAGING/"
 ln -s /Applications "$DMG_STAGING/Applications"
 
+# Create a read-write DMG first so we can configure the Finder view
+DMG_RW="$BUNDLE_DIR/${APP_NAME}_rw.dmg"
+rm -f "$DMG_RW"
 hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_STAGING" \
-    -ov -format UDZO "$DMG_PATH"
-
+    -ov -format UDRW "$DMG_RW"
 rm -rf "$DMG_STAGING"
+
+# Mount the read-write DMG and configure Finder layout
+MOUNT_DIR="/Volumes/$APP_NAME"
+hdiutil attach "$DMG_RW" -mountpoint "$MOUNT_DIR" -noverify
+
+osascript <<APPLESCRIPT
+tell application "Finder"
+    tell disk "$APP_NAME"
+        open
+        set current view of container window to icon view
+        set toolbar visible of container window to false
+        set statusbar visible of container window to false
+        set bounds of container window to {100, 100, 640, 400}
+        set theViewOptions to icon view options of container window
+        set arrangement of theViewOptions to not arranged
+        set icon size of theViewOptions to 80
+        set position of item "$APP_NAME.app" of container window to {140, 150}
+        set position of item "Applications" of container window to {400, 150}
+        close
+        open
+        close
+    end tell
+end tell
+APPLESCRIPT
+
+# Give Finder time to write .DS_Store
+sync
+sleep 3
+
+# Detach: Finder eject first (also unmounts), fall back to hdiutil
+if [ -d "$MOUNT_DIR" ]; then
+    osascript -e "tell application \"Finder\" to eject disk \"$APP_NAME\"" 2>/dev/null || true
+    sleep 2
+fi
+if [ -d "$MOUNT_DIR" ]; then
+    hdiutil detach "$MOUNT_DIR" -force
+fi
+
+# Convert to compressed read-only DMG
+hdiutil convert "$DMG_RW" -format UDZO -o "$DMG_PATH"
+rm -f "$DMG_RW"
 
 # Sign the DMG too
 codesign --force --timestamp --sign "$SIGNING_IDENTITY" "$DMG_PATH"
