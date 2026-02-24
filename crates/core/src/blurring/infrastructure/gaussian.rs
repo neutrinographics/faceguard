@@ -52,6 +52,24 @@ pub fn separable_gaussian_blur_with_temp(
         return;
     }
     let kernel = gaussian_kernel_1d(kernel_size);
+    separable_gaussian_blur_with_kernel(data, width, height, channels, &kernel, temp);
+}
+
+/// Apply a separable Gaussian blur using a pre-computed kernel, reusing `temp`.
+///
+/// Use this in hot paths where the kernel is computed once and reused across frames.
+pub fn separable_gaussian_blur_with_kernel(
+    data: &mut [u8],
+    width: usize,
+    height: usize,
+    channels: usize,
+    kernel: &[f32],
+    temp: &mut Vec<f32>,
+) {
+    let kernel_size = kernel.len();
+    if kernel_size <= 1 || width == 0 || height == 0 {
+        return;
+    }
     let half = kernel_size / 2;
 
     // Reuse temp buffer (only reallocates if capacity is insufficient)

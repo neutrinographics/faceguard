@@ -169,7 +169,7 @@ Only `with_inter_threads(1)` is set. No `with_intra_threads()`, so CPU fallback 
 
 ## LOW Impact
 
-### 19. Gaussian kernel recomputed per call
+### 19. ~~Gaussian kernel recomputed per call~~
 **File**: `crates/core/src/blurring/infrastructure/gaussian.rs:35`
 
 `gaussian_kernel_1d()` called every blur. Redundant since kernel_size is fixed per job.

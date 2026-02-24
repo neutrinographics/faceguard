@@ -16,8 +16,10 @@ const DEFAULT_KERNEL_SIZE: usize = 201;
 /// the blur extends smoothly off frame edges.
 pub struct CpuEllipticalBlurrer {
     kernel_size: usize,
+    kernel: Vec<f32>,
     scale: usize,
     small_k: usize,
+    small_kernel: Vec<f32>,
     roi_buf: RefCell<Vec<u8>>,
     blur_temp: RefCell<Vec<f32>>,
 }
@@ -28,8 +30,10 @@ impl CpuEllipticalBlurrer {
         let small_k = (kernel_size / scale) | 1; // ensure odd
         Self {
             kernel_size,
+            kernel: gaussian::gaussian_kernel_1d(kernel_size),
             scale,
             small_k,
+            small_kernel: gaussian::gaussian_kernel_1d(small_k),
             roi_buf: RefCell::new(Vec::new()),
             blur_temp: RefCell::new(Vec::new()),
         }
@@ -76,10 +80,10 @@ impl FrameBlurrer for CpuEllipticalBlurrer {
             // Blur ROI (with downscale optimization for large kernels)
             let mut temp = self.blur_temp.borrow_mut();
             if self.scale <= 1 || rh < self.scale * 2 || rw < self.scale * 2 {
-                gaussian::separable_gaussian_blur_with_temp(&mut roi, rw, rh, channels, self.kernel_size, &mut temp);
+                gaussian::separable_gaussian_blur_with_kernel(&mut roi, rw, rh, channels, &self.kernel, &mut temp);
             } else {
                 let (mut small, sw, sh) = gaussian::downscale(&roi, rw, rh, channels, self.scale);
-                gaussian::separable_gaussian_blur_with_temp(&mut small, sw, sh, channels, self.small_k, &mut temp);
+                gaussian::separable_gaussian_blur_with_kernel(&mut small, sw, sh, channels, &self.small_kernel, &mut temp);
                 let upscaled = gaussian::upscale(&small, sw, sh, channels, rw, rh);
                 roi[..roi_size].copy_from_slice(&upscaled);
             }
