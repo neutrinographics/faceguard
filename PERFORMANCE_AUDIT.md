@@ -113,7 +113,7 @@ MPEG4 Part 2 produces 30-50% larger files than H.264 at the same quality.
 
 ---
 
-### 13. GPU shader recomputes exp() per pixel per tap
+### 13. ~~GPU shader recomputes exp() per pixel per tap~~
 **File**: `crates/core/src/blurring/infrastructure/shaders/gaussian_blur.wgsl:66`
 
 For kernel_radius=100, each pixel computes 201 `exp()` calls. For a 512x512 region: 52M exp() operations.

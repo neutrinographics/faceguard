@@ -62,6 +62,8 @@ struct CachedBuffers {
     staging: wgpu::Buffer,
     params_h: wgpu::Buffer,
     params_v: wgpu::Buffer,
+    kernel_weights: wgpu::Buffer,
+    kernel_weights_capacity: usize,
     /// Large staging buffer for batch readback (sum of all ROI sizes).
     batch_staging: Option<wgpu::Buffer>,
     batch_staging_capacity: usize,
@@ -179,6 +181,17 @@ impl GpuContext {
                     },
                     count: None,
                 },
+                // kernel_weights storage (read)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -213,6 +226,15 @@ impl GpuContext {
             mapped_at_creation: false,
         });
 
+        // Initial kernel weights buffer (will grow as needed)
+        let initial_kernel_capacity = 201; // covers default kernel_size
+        let kernel_weights = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cached-kernel-weights"),
+            size: (initial_kernel_capacity * 4) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         let buffers = Mutex::new(CachedBuffers {
             capacity: INITIAL_CAPACITY,
             input,
@@ -221,6 +243,8 @@ impl GpuContext {
             staging,
             params_h,
             params_v,
+            kernel_weights,
+            kernel_weights_capacity: initial_kernel_capacity,
             batch_staging: None,
             batch_staging_capacity: 0,
         });
@@ -329,6 +353,30 @@ impl GpuContext {
             let buf_size = (pixel_count * 4) as u64;
             let kernel_radius = roi.kernel_size / 2;
             let sigma = roi.kernel_size as f32 / 6.0;
+            let kernel_len = (2 * kernel_radius + 1) as usize;
+
+            // Compute kernel weights on CPU
+            let sigma64 = roi.kernel_size as f64 / 6.0;
+            let half = kernel_radius as f64;
+            let weights: Vec<f32> = (0..kernel_len)
+                .map(|i| {
+                    let x = i as f64 - half;
+                    (-x * x / (2.0 * sigma64 * sigma64)).exp() as f32
+                })
+                .collect();
+
+            // Grow kernel weights buffer if needed
+            if kernel_len > cache.kernel_weights_capacity {
+                cache.kernel_weights = self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("cached-kernel-weights"),
+                    size: (kernel_len * 4) as u64,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                cache.kernel_weights_capacity = kernel_len;
+            }
+            self.queue
+                .write_buffer(&cache.kernel_weights, 0, bytemuck::cast_slice(&weights));
 
             // Upload pixel data
             self.queue
@@ -382,6 +430,10 @@ impl GpuContext {
                         binding: 3,
                         resource: cache.original.as_entire_binding(),
                     },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: cache.kernel_weights.as_entire_binding(),
+                    },
                 ],
             });
 
@@ -404,6 +456,10 @@ impl GpuContext {
                     wgpu::BindGroupEntry {
                         binding: 3,
                         resource: cache.original.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: cache.kernel_weights.as_entire_binding(),
                     },
                 ],
             });
