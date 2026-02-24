@@ -1,16 +1,16 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
-use iced::widget::{button, checkbox, column, container, image, row, rule, text, Space};
+use iced::widget::{button, checkbox, column, container, image, row, text, Space};
 use iced::{Element, Length, Theme};
 
 use crate::app::{scaled, Message};
 use crate::theme::muted_color;
 
 /// Card size in logical pixels.
-const CARD_SIZE: f32 = 76.0;
+const CARD_SIZE: f32 = 96.0;
 /// Spacing between cards.
-const CARD_SPACING: f32 = 8.0;
+const CARD_SPACING: f32 = 10.0;
 
 /// State for the faces well.
 #[derive(Debug, Clone)]
@@ -134,28 +134,29 @@ pub fn view<'a>(state: &FacesWellState, fs: f32, theme: &Theme) -> Element<'a, M
         format!("{selected} of {total} faces selected")
     };
 
-    let header = row![
-        checkbox(state.group_faces)
-            .label("Group similar faces")
-            .on_toggle(Message::GroupFacesToggled)
-            .text_size(scaled(12.0, fs)),
-        Space::new().width(Length::Fill),
-        text(label).size(scaled(11.0, fs)).color(muted),
-    ]
-    .spacing(8)
-    .align_y(iced::Alignment::Center);
+    let mut col = column![].spacing(0).width(Length::Fill);
 
-    let mut col = column![header, Space::new().height(8), rule::horizontal(1),]
-        .spacing(0)
-        .width(Length::Fill);
-
-    col = col.push(Space::new().height(8));
-
+    // Card grid
     if state.group_faces && !state.groups.is_empty() {
         col = col.push(build_grouped_grid(state, fs));
     } else {
         col = col.push(build_individual_grid(state, fs));
     }
+
+    // Footer: checkbox + count label
+    col = col.push(Space::new().height(10));
+    col = col.push(
+        row![
+            checkbox(state.group_faces)
+                .label("Group similar faces")
+                .on_toggle(Message::GroupFacesToggled)
+                .text_size(scaled(12.0, fs)),
+            Space::new().width(Length::Fill),
+            text(label).size(scaled(11.0, fs)).color(muted),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center),
+    );
 
     container(col)
         .padding(10)
@@ -205,8 +206,7 @@ fn build_grouped_grid<'a>(state: &FacesWellState, fs: f32) -> Element<'a, Messag
 
 /// Arrange cards in wrapping rows.
 fn wrap_cards(cards: Vec<Element<'_, Message>>) -> Element<'_, Message> {
-    // Approximate wrapping: assume ~400px available width
-    let cards_per_row = ((400.0) / (CARD_SIZE + CARD_SPACING)).floor() as usize;
+    let cards_per_row = ((480.0) / (CARD_SIZE + CARD_SPACING)).floor() as usize;
     let cards_per_row = cards_per_row.max(1);
 
     let mut rows_col = column![].spacing(CARD_SPACING);
@@ -230,13 +230,13 @@ fn wrap_cards(cards: Vec<Element<'_, Message>>) -> Element<'_, Message> {
     rows_col.into()
 }
 
-/// A single face card: 76x76 thumbnail with selection state.
+/// A single face card: 96x96 thumbnail with selection state.
 fn face_card<'a>(track_id: u32, path: &PathBuf, selected: bool, fs: f32) -> Element<'a, Message> {
     let img = image(image::Handle::from_path(path))
         .width(CARD_SIZE)
         .height(CARD_SIZE);
 
-    let label = if selected { "✓" } else { "" };
+    let label = if selected { "\u{2713}" } else { "" };
 
     let btn =
         button(column![img, text(label).size(scaled(10.0, fs)),].align_x(iced::Alignment::Center))
@@ -270,7 +270,7 @@ fn group_card<'a>(
         String::new()
     };
 
-    let label = if selected { "✓" } else { "" };
+    let label = if selected { "\u{2713}" } else { "" };
 
     let btn = button(
         column![

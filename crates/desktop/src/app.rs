@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crossbeam_channel::Receiver;
-use iced::widget::{button, column, container, row, scrollable, text};
+use iced::widget::{button, column, container, row, scrollable, text, Space};
 use iced::{Element, Length, Subscription, Task, Theme};
 
 use crate::settings::{Appearance, BlurShape, Settings};
@@ -24,28 +24,18 @@ const WEBSITE_URL: &str = "https://www.neutrinographics.com/";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
-    Main,
+    Blur,
     Settings,
-    Appearance,
-    Privacy,
     About,
 }
 
 impl Tab {
-    const ALL: &[Tab] = &[
-        Tab::Main,
-        Tab::Settings,
-        Tab::Appearance,
-        Tab::Privacy,
-        Tab::About,
-    ];
+    const ALL: &[Tab] = &[Tab::Blur, Tab::Settings, Tab::About];
 
     fn label(self) -> &'static str {
         match self {
-            Tab::Main => "Main",
+            Tab::Blur => "Blur",
             Tab::Settings => "Settings",
-            Tab::Appearance => "Appearance",
-            Tab::Privacy => "Privacy",
             Tab::About => "About",
         }
     }
@@ -84,7 +74,7 @@ pub enum Message {
     CancelWork,
     WorkerTick,
     ShowInFolder,
-    DismissComplete,
+    StartOver,
     ToggleFace(u32),
     ToggleGroup(usize),
     GroupFacesToggled(bool),
@@ -122,7 +112,7 @@ impl App {
     pub fn new() -> (Self, Task<Message>) {
         (
             Self {
-                active_tab: Tab::Main,
+                active_tab: Tab::Blur,
                 settings: Settings::load(),
                 input_path: None,
                 output_path: None,
@@ -342,8 +332,12 @@ impl App {
                     }
                 }
             }
-            Message::DismissComplete => {
+            Message::StartOver => {
                 self.processing = ProcessingState::Idle;
+                self.input_path = None;
+                self.output_path = None;
+                self.faces_well.clear();
+                self.detection_cache = None;
             }
             Message::BlurShapeChanged(shape) => {
                 self.settings.blur_shape = shape;
@@ -369,6 +363,9 @@ impl App {
                 self.settings.confidence = defaults.confidence;
                 self.settings.blur_strength = defaults.blur_strength;
                 self.settings.lookahead = defaults.lookahead;
+                self.settings.appearance = defaults.appearance;
+                self.settings.high_contrast = defaults.high_contrast;
+                self.settings.font_scale = defaults.font_scale;
                 self.settings.save();
                 if detection_changed {
                     self.invalidate_detection();
@@ -406,61 +403,66 @@ impl App {
 
     pub fn view(&self) -> Element<'_, Message> {
         let fs = self.settings.font_scale;
+        let current_theme = self.theme();
+        let palette = current_theme.palette();
+        let muted = theme::muted_color(&current_theme);
 
-        // Tab bar
+        // Underline-style tab bar
         let tab_bar = container(
             row(Tab::ALL
                 .iter()
                 .map(|&tab| {
-                    let label = text(tab.label()).size(scaled(13.0, fs));
+                    let is_active = tab == self.active_tab;
+                    let label_color = if is_active { palette.primary } else { muted };
+                    let label = text(tab.label())
+                        .size(scaled(13.0, fs))
+                        .color(label_color);
                     let btn = button(label)
                         .on_press(Message::TabSelected(tab))
-                        .padding([8, 18]);
-                    if tab == self.active_tab {
-                        btn.style(button::primary).into()
+                        .padding([12, 20])
+                        .style(button::text);
+
+                    let bar: Element<'_, Message> = if is_active {
+                        container(Space::new().height(0))
+                            .width(Length::Fill)
+                            .height(2)
+                            .style(move |_theme: &Theme| container::Style {
+                                background: Some(palette.primary.into()),
+                                ..Default::default()
+                            })
+                            .into()
                     } else {
-                        btn.style(button::text).into()
-                    }
+                        Space::new().height(2).into()
+                    };
+
+                    column![btn, bar].align_x(iced::Alignment::Center).into()
                 })
                 .collect::<Vec<_>>())
-            .spacing(2),
+            .spacing(0),
         )
-        .padding([4, 8]);
+        .padding([0, 8]);
 
         // Tab content
         let content: Element<'_, Message> = match self.active_tab {
-            Tab::Main => {
-                let theme = self.theme();
+            Tab::Blur => {
                 tabs::main_tab::view(
                     fs,
                     self.input_path.as_deref(),
                     self.output_path.as_deref(),
                     &self.processing,
                     &self.faces_well,
-                    &theme,
+                    &current_theme,
                 )
             }
             Tab::Settings => tabs::settings_tab::view(&self.settings),
-            Tab::Appearance => tabs::appearance_tab::view(&self.settings),
-            Tab::Privacy => tabs::privacy_tab::view(fs),
             Tab::About => tabs::about_tab::view(fs),
         };
 
         let tab_content = container(scrollable(content).height(Length::Fill))
-            .padding(16)
+            .padding(24)
             .height(Length::Fill);
 
-        // Footer
-        let footer = container(
-            button(text("neutrinographics.com").size(scaled(11.0, fs)))
-                .on_press(Message::OpenWebsite)
-                .style(button::text),
-        )
-        .width(Length::Fill)
-        .center_x(Length::Fill)
-        .padding([6, 0]);
-
-        column![tab_bar, tab_content, footer]
+        column![tab_bar, tab_content]
             .spacing(0)
             .height(Length::Fill)
             .into()

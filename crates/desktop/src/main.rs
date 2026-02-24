@@ -15,7 +15,7 @@ fn main() -> iced::Result {
         .theme(App::theme)
         .subscription(App::subscription)
         .window(iced::window::Settings {
-            size: iced::Size::new(520.0, 360.0),
+            size: iced::Size::new(560.0, 440.0),
             icon: load_icon(),
             ..Default::default()
         })
