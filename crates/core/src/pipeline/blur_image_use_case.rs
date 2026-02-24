@@ -7,7 +7,7 @@ use crate::shared::region::Region;
 use crate::video::domain::image_writer::ImageWriter;
 use crate::video::domain::video_reader::VideoReader;
 
-/// Single-image blurring pipeline: read → detect → filter → blur → write.
+/// Single-image variant of the blur pipeline (no threading, no lookahead).
 pub struct BlurImageUseCase {
     reader: Box<dyn VideoReader>,
     image_writer: Box<dyn ImageWriter>,
@@ -36,7 +36,6 @@ impl BlurImageUseCase {
         }
     }
 
-    /// Reads a single image, detects faces, filters, blurs, and writes output.
     pub fn execute(
         &mut self,
         input_path: &Path,

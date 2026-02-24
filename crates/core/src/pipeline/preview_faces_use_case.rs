@@ -8,16 +8,19 @@ use crate::shared::video_metadata::VideoMetadata;
 use crate::video::domain::image_writer::ImageWriter;
 use crate::video::domain::video_reader::VideoReader;
 
-/// Preview thumbnail size in pixels.
 const PREVIEW_SIZE: u32 = 256;
 
-/// Return type for [`PreviewFacesUseCase::execute`].
 pub type PreviewResult = (HashMap<u32, PathBuf>, HashMap<usize, Vec<Region>>);
+
+/// Best crop found so far per track ID: maps track_id → (area, cropped frame).
+type BestCrops = HashMap<u32, (u32, Frame)>;
+
+type DetectionCache = HashMap<usize, Vec<Region>>;
 
 /// Scans a video for faces and saves the best crop of each tracked identity.
 ///
-/// Selects the largest detection per track ID (by area) as the representative
-/// crop, giving downstream grouping and the UI the clearest possible thumbnail.
+/// Selects the largest detection per track ID (by area), giving downstream
+/// grouping and the UI the clearest possible thumbnail.
 pub struct PreviewFacesUseCase {
     reader: Box<dyn VideoReader>,
     detector: Box<dyn FaceDetector>,
@@ -40,46 +43,37 @@ impl PreviewFacesUseCase {
         }
     }
 
-    /// Runs face preview scan and saves crops to disk.
+    /// Scans all frames, saves 256x256 thumbnails, and returns a detection cache.
     ///
-    /// Returns `(crops_by_id, detection_cache)`:
-    /// - `crops_by_id`: track_id → file path of saved thumbnail
-    /// - `detection_cache`: frame_index → detected regions (for reuse in blur pass)
+    /// Returns `(crops_by_id, detection_cache)` where the detection cache maps
+    /// frame indices to regions for reuse in the blur pass.
     pub fn execute(
         &mut self,
         metadata: &VideoMetadata,
         output_dir: &Path,
     ) -> Result<PreviewResult, Box<dyn std::error::Error>> {
-        // track_id → (area, crop_frame)
-        let mut best: HashMap<u32, (u32, Frame)> = HashMap::new();
-        let mut detection_cache: HashMap<usize, Vec<Region>> = HashMap::new();
+        let (best_crops, detection_cache) = self.scan_frames(metadata.total_frames)?;
+        let saved_paths = self.save_crops(best_crops, output_dir)?;
+        Ok((saved_paths, detection_cache))
+    }
 
-        let total_frames = metadata.total_frames;
+    fn scan_frames(
+        &mut self,
+        total_frames: usize,
+    ) -> Result<(BestCrops, DetectionCache), Box<dyn std::error::Error>> {
+        let mut best_crops: BestCrops = HashMap::new();
+        let mut detection_cache: DetectionCache = HashMap::new();
 
-        // Decode and detect one frame at a time so progress is reported
-        // immediately rather than after buffering the entire video.
-        // We split reader/detector out of self to satisfy the borrow checker.
         let reader = &mut self.reader;
         let detector = &mut self.detector;
         let on_progress = &self.on_progress;
 
         for result in reader.frames() {
             let frame = result?;
-
             let regions = detector.detect(&frame)?;
 
             detection_cache.insert(frame.index(), regions.clone());
-
-            for r in &regions {
-                let Some(track_id) = r.track_id else {
-                    continue;
-                };
-                let area = r.width as u32 * r.height as u32;
-                if !best.contains_key(&track_id) || area > best[&track_id].0 {
-                    let crop = square_crop(&frame, r);
-                    best.insert(track_id, (area, crop));
-                }
-            }
+            update_best_crops(&mut best_crops, &frame, &regions);
 
             if let Some(ref callback) = on_progress {
                 if !callback(frame.index() + 1, total_frames) {
@@ -89,24 +83,46 @@ impl PreviewFacesUseCase {
         }
 
         self.reader.close();
+        Ok((best_crops, detection_cache))
+    }
 
-        let mut result: HashMap<u32, PathBuf> = HashMap::new();
-        let mut sorted_ids: Vec<u32> = best.keys().copied().collect();
+    fn save_crops(
+        &self,
+        mut best_crops: BestCrops,
+        output_dir: &Path,
+    ) -> Result<HashMap<u32, PathBuf>, Box<dyn std::error::Error>> {
+        let mut sorted_ids: Vec<u32> = best_crops.keys().copied().collect();
         sorted_ids.sort();
 
+        let mut saved = HashMap::new();
         for track_id in sorted_ids {
-            let (_, crop) = best.remove(&track_id).unwrap();
+            let (_, crop) = best_crops.remove(&track_id).unwrap();
             let path = output_dir.join(format!("{track_id}.jpg"));
             self.image_writer
                 .write(&path, &crop, Some((PREVIEW_SIZE, PREVIEW_SIZE)))?;
-            result.insert(track_id, path);
+            saved.insert(track_id, path);
         }
-
-        Ok((result, detection_cache))
+        Ok(saved)
     }
 }
 
-/// Extracts a square crop centered on the region, clamped to frame bounds.
+fn update_best_crops(
+    best: &mut BestCrops,
+    frame: &Frame,
+    regions: &[Region],
+) {
+    for r in regions {
+        let Some(track_id) = r.track_id else {
+            continue;
+        };
+        let area = r.width as u32 * r.height as u32;
+        let is_largest = best.get(&track_id).map_or(true, |(prev, _)| area > *prev);
+        if is_largest {
+            best.insert(track_id, (area, square_crop(frame, r)));
+        }
+    }
+}
+
 fn square_crop(frame: &Frame, region: &Region) -> Frame {
     let fw = frame.width() as i32;
     let fh = frame.height() as i32;

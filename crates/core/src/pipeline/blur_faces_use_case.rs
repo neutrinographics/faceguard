@@ -12,20 +12,19 @@ use crate::video::domain::video_writer::VideoWriter;
 
 use super::pipeline_executor::{PipelineConfig, PipelineExecutor};
 
-/// Default number of frames to buffer for lookahead merging.
 const DEFAULT_LOOKAHEAD: usize = 5;
 
 /// Orchestrates the full video blurring pipeline.
 ///
-/// Delegates execution to a `PipelineExecutor` which handles threading
-/// and I/O scheduling. The use case is responsible for wiring together
-/// domain components and configuration.
+/// Wires domain components together and delegates execution to a
+/// `PipelineExecutor`. This is a single-use struct: `execute` consumes
+/// the owned components, so calling it twice will fail.
 pub struct BlurFacesUseCase {
-    reader: Box<dyn VideoReader>,
-    writer: Box<dyn VideoWriter>,
-    detector: Box<dyn FaceDetector>,
-    blurrer: Box<dyn FrameBlurrer>,
-    merger: RegionMerger,
+    reader: Option<Box<dyn VideoReader>>,
+    writer: Option<Box<dyn VideoWriter>>,
+    detector: Option<Box<dyn FaceDetector>>,
+    blurrer: Option<Box<dyn FrameBlurrer>>,
+    merger: Option<RegionMerger>,
     executor: Box<dyn PipelineExecutor>,
     lookahead: usize,
     blur_ids: Option<HashSet<u32>>,
@@ -50,11 +49,11 @@ impl BlurFacesUseCase {
         cancelled: Option<Arc<AtomicBool>>,
     ) -> Self {
         Self {
-            reader,
-            writer,
-            detector,
-            blurrer,
-            merger,
+            reader: Some(reader),
+            writer: Some(writer),
+            detector: Some(detector),
+            blurrer: Some(blurrer),
+            merger: Some(merger),
             executor,
             lookahead: lookahead.unwrap_or(DEFAULT_LOOKAHEAD),
             blur_ids,
@@ -64,7 +63,6 @@ impl BlurFacesUseCase {
         }
     }
 
-    /// Executes the pipeline by delegating to the injected PipelineExecutor.
     pub fn execute(
         &mut self,
         metadata: &VideoMetadata,
@@ -78,88 +76,16 @@ impl BlurFacesUseCase {
             cancelled: self.cancelled.clone(),
         };
 
-        let reader = std::mem::replace(&mut self.reader, Box::new(NullReader));
-        let writer = std::mem::replace(&mut self.writer, Box::new(NullWriter));
-        let detector = std::mem::replace(&mut self.detector, Box::new(NullDetector));
-        let blurrer = std::mem::replace(&mut self.blurrer, Box::new(NullBlurrer));
-        let merger = std::mem::take(&mut self.merger);
-
         self.executor.execute(
-            reader,
-            writer,
-            detector,
-            blurrer,
-            merger,
+            self.reader.take().ok_or("Pipeline already executed")?,
+            self.writer.take().ok_or("Pipeline already executed")?,
+            self.detector.take().ok_or("Pipeline already executed")?,
+            self.blurrer.take().ok_or("Pipeline already executed")?,
+            self.merger.take().ok_or("Pipeline already executed")?,
             metadata,
             output_path,
             config,
         )
-    }
-}
-
-// --- Placeholder types for std::mem::replace ---
-
-struct NullReader;
-
-impl VideoReader for NullReader {
-    fn open(&mut self, _path: &Path) -> Result<VideoMetadata, Box<dyn std::error::Error>> {
-        Err("NullReader".into())
-    }
-
-    fn frames(
-        &mut self,
-    ) -> Box<
-        dyn Iterator<Item = Result<crate::shared::frame::Frame, Box<dyn std::error::Error>>> + '_,
-    > {
-        Box::new(std::iter::empty())
-    }
-
-    fn close(&mut self) {}
-}
-
-struct NullWriter;
-
-impl VideoWriter for NullWriter {
-    fn open(
-        &mut self,
-        _path: &Path,
-        _metadata: &VideoMetadata,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        Err("NullWriter".into())
-    }
-
-    fn write(
-        &mut self,
-        _frame: &crate::shared::frame::Frame,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        Err("NullWriter".into())
-    }
-
-    fn close(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        Ok(())
-    }
-}
-
-struct NullDetector;
-
-impl FaceDetector for NullDetector {
-    fn detect(
-        &mut self,
-        _frame: &crate::shared::frame::Frame,
-    ) -> Result<Vec<crate::shared::region::Region>, Box<dyn std::error::Error>> {
-        Err("NullDetector".into())
-    }
-}
-
-struct NullBlurrer;
-
-impl FrameBlurrer for NullBlurrer {
-    fn blur(
-        &self,
-        _frame: &mut crate::shared::frame::Frame,
-        _regions: &[crate::shared::region::Region],
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        Err("NullBlurrer".into())
     }
 }
 

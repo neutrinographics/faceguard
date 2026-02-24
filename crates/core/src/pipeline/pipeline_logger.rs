@@ -1,32 +1,19 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-/// Cross-cutting logger for pipeline orchestration events.
+/// Observability hook for pipeline orchestration events.
 ///
-/// Decouples use cases from specific output mechanisms (stdout, GUI signals,
-/// log crate) so each caller can observe pipeline behavior without changing
-/// the orchestration code.
+/// Decouples use cases from output mechanisms (stdout, GUI, log crate)
+/// so callers can observe pipeline behavior without changing orchestration.
 pub trait PipelineLogger: Send {
-    /// Report frame-level progress.
     fn progress(&mut self, current: usize, total: usize);
-
-    /// Record how long a named pipeline stage took for one frame.
     fn timing(&mut self, stage: &str, duration_ms: f64);
-
-    /// Record a point-in-time metric (e.g. queue depth, region count).
     fn metric(&mut self, name: &str, value: f64);
-
-    /// Log a human-readable status message.
     fn info(&mut self, message: &str);
-
-    /// Emit an end-of-pipeline summary. Default: no-op.
     fn summary(&self) {}
 }
 
-/// Silent logger that discards all events.
-///
-/// Used by the desktop GUI (which has its own signal-based progress)
-/// and by tests where logger output is irrelevant.
+/// Silent logger for contexts where output is irrelevant (GUI, tests).
 pub struct NullPipelineLogger;
 
 impl PipelineLogger for NullPipelineLogger {
@@ -36,11 +23,10 @@ impl PipelineLogger for NullPipelineLogger {
     fn info(&mut self, _message: &str) {}
 }
 
-/// CLI-oriented logger that tracks per-stage timing, metrics, and
-/// provides a summary report at pipeline completion.
+/// CLI logger that accumulates per-stage timings and metrics for a
+/// summary report at pipeline completion.
 ///
-/// Progress output is throttled to every `throttle_frames` frames
-/// to avoid excessive I/O on large videos.
+/// Progress output is throttled to avoid excessive I/O on large videos.
 pub struct StdoutPipelineLogger {
     throttle_frames: usize,
     timings: HashMap<String, Vec<f64>>,
@@ -62,7 +48,6 @@ impl StdoutPipelineLogger {
         }
     }
 
-    /// Returns the formatted summary string, or `None` if no data recorded.
     pub fn summary_string(&self) -> Option<String> {
         if self.timings.is_empty() && self.metrics.is_empty() {
             return None;
@@ -70,44 +55,13 @@ impl StdoutPipelineLogger {
 
         let elapsed_ms = self.start_time.elapsed().as_secs_f64() * 1000.0;
         let frames = self.total_frames;
-        let mut lines = Vec::new();
-
-        lines.push(format!(
+        let mut lines = vec![format!(
             "Pipeline summary ({frames} frames, {:.1}s total):",
-            elapsed_ms / 1000.0
-        ));
+            elapsed_ms / 1000.0,
+        )];
 
-        let mut stages: Vec<_> = self.timings.keys().collect();
-        stages.sort();
-        for stage in stages {
-            let durations = &self.timings[stage];
-            let total_ms: f64 = durations.iter().sum();
-            let avg_ms = if durations.is_empty() {
-                0.0
-            } else {
-                total_ms / durations.len() as f64
-            };
-            let pct = if elapsed_ms > 0.0 {
-                total_ms / elapsed_ms * 100.0
-            } else {
-                0.0
-            };
-            lines.push(format!(
-                "  {stage:12}: avg {avg_ms:6.1}ms  total {total_ms:7.0}ms  ({pct:4.1}%)"
-            ));
-        }
-
-        let mut metric_names: Vec<_> = self.metrics.keys().collect();
-        metric_names.sort();
-        for name in metric_names {
-            let values = &self.metrics[name];
-            let avg = if values.is_empty() {
-                0.0
-            } else {
-                values.iter().sum::<f64>() / values.len() as f64
-            };
-            lines.push(format!("  {name}: avg {avg:.1}"));
-        }
+        lines.extend(self.format_timings(elapsed_ms));
+        lines.extend(self.format_metrics());
 
         if frames > 0 && elapsed_ms > 0.0 {
             let fps = frames as f64 / (elapsed_ms / 1000.0);
@@ -117,14 +71,51 @@ impl StdoutPipelineLogger {
         Some(lines.join("\n"))
     }
 
-    /// Returns the timing data for a given stage.
     pub fn timings_for(&self, stage: &str) -> Option<&[f64]> {
         self.timings.get(stage).map(|v| v.as_slice())
     }
 
-    /// Returns the metric data for a given name.
     pub fn metrics_for(&self, name: &str) -> Option<&[f64]> {
         self.metrics.get(name).map(|v| v.as_slice())
+    }
+
+    fn format_timings(&self, elapsed_ms: f64) -> Vec<String> {
+        let mut stages: Vec<_> = self.timings.keys().collect();
+        stages.sort();
+        stages
+            .into_iter()
+            .map(|stage| {
+                let durations = &self.timings[stage];
+                let total_ms: f64 = durations.iter().sum();
+                let avg_ms = average(durations);
+                let pct = if elapsed_ms > 0.0 {
+                    total_ms / elapsed_ms * 100.0
+                } else {
+                    0.0
+                };
+                format!("  {stage:12}: avg {avg_ms:6.1}ms  total {total_ms:7.0}ms  ({pct:4.1}%)")
+            })
+            .collect()
+    }
+
+    fn format_metrics(&self) -> Vec<String> {
+        let mut names: Vec<_> = self.metrics.keys().collect();
+        names.sort();
+        names
+            .into_iter()
+            .map(|name| {
+                let avg = average(&self.metrics[name]);
+                format!("  {name}: avg {avg:.1}")
+            })
+            .collect()
+    }
+}
+
+fn average(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        0.0
+    } else {
+        values.iter().sum::<f64>() / values.len() as f64
     }
 }
 
