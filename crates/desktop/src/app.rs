@@ -83,6 +83,8 @@ pub enum Message {
     RunBlur,
     CancelWork,
     WorkerTick,
+    ShowInFolder,
+    DismissComplete,
     ToggleFace(u32),
     ToggleGroup(usize),
     GroupFacesToggled(bool),
@@ -334,6 +336,16 @@ impl App {
             }
             Message::GroupFacesToggled(enabled) => {
                 self.faces_well.group_faces = enabled;
+            }
+            Message::ShowInFolder => {
+                if let Some(ref output) = self.output_path {
+                    if let Some(parent) = output.parent() {
+                        let _ = open::that(parent);
+                    }
+                }
+            }
+            Message::DismissComplete => {
+                self.processing = ProcessingState::Idle;
             }
             Message::DetectorChanged(detector) => {
                 self.settings.detector = detector;

@@ -155,11 +155,18 @@ pub fn view<'a>(
             ProcessingState::Complete => {
                 col = col
                     .push(text("Processing complete!").size(scaled(14.0, fs)))
-                    .push(Space::new().height(8))
+                    .push(Space::new().height(12))
                     .push(
-                        button(text("Run Again").size(scaled(13.0, fs)))
-                            .on_press(Message::RunBlur)
-                            .padding([8, 24]),
+                        row![
+                            button(text("OK").size(scaled(13.0, fs)))
+                                .on_press(Message::DismissComplete)
+                                .padding([8, 24]),
+                            button(text("Show in Folder").size(scaled(13.0, fs)))
+                                .on_press(Message::ShowInFolder)
+                                .padding([8, 24])
+                                .style(button::secondary),
+                        ]
+                        .spacing(8),
                     );
             }
             ProcessingState::Error(e) => {
