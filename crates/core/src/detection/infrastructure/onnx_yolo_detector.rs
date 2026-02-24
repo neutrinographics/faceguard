@@ -90,9 +90,13 @@ impl OnnxYoloDetector {
     pub fn build_session(
         model_path: &Path,
     ) -> Result<ort::session::Session, Box<dyn std::error::Error>> {
+        let intra_threads = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
         let session = ort::session::Session::builder()?
             .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)?
             .with_inter_threads(1)?
+            .with_intra_threads(intra_threads)?
             .with_execution_providers([
                 ort::execution_providers::CoreMLExecutionProvider::default().build(),
             ])?

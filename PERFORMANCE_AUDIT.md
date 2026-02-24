@@ -149,7 +149,7 @@ Full `HashMap<usize, Vec<Region>>` cloned when passed to `CachedFaceDetector`. S
 
 ---
 
-### 17. No ONNX intra-op threading configured
+### 17. ~~No ONNX intra-op threading configured~~
 **File**: `crates/core/src/detection/infrastructure/onnx_yolo_detector.rs:91`
 
 Only `with_inter_threads(1)` is set. No `with_intra_threads()`, so CPU fallback may underutilize cores.
