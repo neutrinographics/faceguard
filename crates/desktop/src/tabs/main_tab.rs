@@ -13,7 +13,7 @@ pub fn view<'a>(
 ) -> Element<'a, Message> {
     let is_processing = matches!(
         processing,
-        ProcessingState::Downloading(..) | ProcessingState::Blurring(..)
+        ProcessingState::Preparing | ProcessingState::Downloading(..) | ProcessingState::Blurring(..)
     );
 
     let mut col = column![
@@ -49,14 +49,22 @@ pub fn view<'a>(
                         .padding([8, 24]),
                 );
             }
+            ProcessingState::Preparing => {
+                col = col
+                    .push(text("Loading model...").size(scaled(13.0, fs)))
+                    .push(Space::new().height(8))
+                    .push(
+                        button(text("Cancel").size(scaled(13.0, fs)))
+                            .on_press(Message::CancelBlur)
+                            .padding([6, 16]),
+                    );
+            }
             ProcessingState::Downloading(downloaded, total) => {
                 let status = if *total > 0 {
                     let pct = (*downloaded as f64 / *total as f64 * 100.0) as u32;
                     format!("Downloading model... {pct}%")
-                } else if *downloaded > 0 {
-                    format!("Downloading model... {} bytes", downloaded)
                 } else {
-                    "Preparing...".to_string()
+                    format!("Downloading model... {} bytes", downloaded)
                 };
                 col = col
                     .push(text(status).size(scaled(13.0, fs)))

@@ -54,6 +54,7 @@ impl Tab {
 #[derive(Debug, Clone)]
 pub enum ProcessingState {
     Idle,
+    Preparing,
     Downloading(u64, u64),
     Blurring(usize, usize),
     Complete,
@@ -211,7 +212,7 @@ impl App {
                     let (rx, cancel) = blur_worker::spawn(params);
                     self.worker_rx = Some(rx);
                     self.worker_cancel = Some(cancel);
-                    self.processing = ProcessingState::Downloading(0, 0);
+                    self.processing = ProcessingState::Preparing;
                 }
             }
             Message::CancelBlur => {
