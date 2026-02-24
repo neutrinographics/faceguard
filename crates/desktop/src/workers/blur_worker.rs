@@ -47,6 +47,7 @@ pub struct BlurParams {
     pub confidence: u32,
     pub blur_strength: u32,
     pub lookahead: u32,
+    pub quality: u32,
     pub detection_cache: Option<Arc<HashMap<usize, Vec<Region>>>>,
     pub blur_ids: Option<HashSet<u32>>,
     pub model_cache: Arc<ModelCache>,
@@ -192,7 +193,8 @@ fn blur_video(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut reader: Box<dyn VideoReader> = Box::new(FfmpegReader::new());
     let metadata = reader.open(input)?;
-    let writer: Box<dyn VideoWriter> = Box::new(FfmpegWriter::new());
+    let crf = crate::settings::quality_to_crf(params.quality);
+    let writer: Box<dyn VideoWriter> = Box::new(FfmpegWriter::new().with_crf(crf));
     let merger = RegionMerger::new();
 
     let _ = tx.send(WorkerMessage::BlurProgress(0, metadata.total_frames));

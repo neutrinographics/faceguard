@@ -83,6 +83,18 @@ fn blur_section<'a>(
         text("How heavily faces are blurred.")
             .size(scaled(12.0, fs))
             .color(muted),
+        Space::new().height(16),
+        row![
+            text("Output quality").size(scaled(14.0, fs)),
+            slider(0..=100, settings.quality, Message::QualityChanged),
+            text(quality_label(settings.quality)).size(scaled(13.0, fs)),
+        ]
+        .spacing(12)
+        .align_y(iced::Alignment::Center),
+        Space::new().height(4),
+        text("Higher quality produces larger files.")
+            .size(scaled(12.0, fs))
+            .color(muted),
         Space::new().height(8),
         text(backend_label).size(scaled(11.0, fs)).color(muted),
     ]
@@ -171,6 +183,16 @@ fn blur_intensity_label(strength: u32) -> String {
         _ => "Heavy",
     };
     format!("{qual} ({strength})")
+}
+
+fn quality_label(quality: u32) -> String {
+    let qual = match quality {
+        0..=25 => "Low",
+        26..=55 => "Medium",
+        56..=80 => "High",
+        _ => "Very high",
+    };
+    format!("{qual} ({quality}%)")
 }
 
 fn sensitivity_label(confidence: u32) -> String {

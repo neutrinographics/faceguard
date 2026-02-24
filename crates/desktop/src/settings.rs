@@ -50,9 +50,23 @@ pub struct Settings {
     pub confidence: u32,
     pub blur_strength: u32,
     pub lookahead: u32,
+    #[serde(default = "default_quality")]
+    pub quality: u32,
     pub appearance: Appearance,
     pub high_contrast: bool,
     pub font_scale: f32,
+}
+
+fn default_quality() -> u32 {
+    crf_to_quality(video_blur_core::video::infrastructure::ffmpeg_writer::DEFAULT_CRF)
+}
+
+pub fn quality_to_crf(quality: u32) -> u32 {
+    51 - (quality.min(100) * 51 / 100)
+}
+
+fn crf_to_quality(crf: u32) -> u32 {
+    (51 - crf.min(51)) * 100 / 51
 }
 
 impl Default for Settings {
@@ -62,6 +76,7 @@ impl Default for Settings {
             confidence: 50,
             blur_strength: 201,
             lookahead: 10,
+            quality: default_quality(),
             appearance: Appearance::System,
             high_contrast: false,
             font_scale: 1.0,

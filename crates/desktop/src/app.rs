@@ -81,6 +81,7 @@ pub enum Message {
     RestoreDefaults,
     AppearanceChanged(Appearance),
     HighContrastChanged(bool),
+    QualityChanged(u32),
     FontScaleChanged(f32),
     PollSystemTheme,
     FileDropped(PathBuf),
@@ -182,6 +183,10 @@ impl App {
             }
             Message::LookaheadChanged(val) => {
                 self.settings.lookahead = val;
+                self.settings.save();
+            }
+            Message::QualityChanged(val) => {
+                self.settings.quality = val;
                 self.settings.save();
             }
             Message::RestoreDefaults => self.restore_defaults(),
@@ -361,6 +366,7 @@ impl App {
                 confidence: self.settings.confidence,
                 blur_strength: self.settings.blur_strength,
                 lookahead: self.settings.lookahead,
+                quality: self.settings.quality,
                 detection_cache: self.detection_cache.clone(),
                 blur_ids: self.faces_well.get_selected_ids(),
                 model_cache: self.model_cache.clone(),
