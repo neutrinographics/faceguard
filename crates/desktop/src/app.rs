@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
 use iced::widget::{button, column, container, row, scrollable, text};
@@ -50,6 +51,10 @@ impl Tab {
 pub enum Message {
     TabSelected(Tab),
     OpenWebsite,
+    SelectInput,
+    InputSelected(Option<PathBuf>),
+    SelectOutput,
+    OutputSelected(Option<PathBuf>),
     DetectorChanged(Detector),
     BlurShapeChanged(BlurShape),
     ConfidenceChanged(u32),
@@ -69,6 +74,8 @@ pub enum Message {
 pub struct App {
     active_tab: Tab,
     pub settings: Settings,
+    pub input_path: Option<PathBuf>,
+    pub output_path: Option<PathBuf>,
 }
 
 impl App {
@@ -77,6 +84,8 @@ impl App {
             Self {
                 active_tab: Tab::Main,
                 settings: Settings::load(),
+                input_path: None,
+                output_path: None,
             },
             Task::none(),
         )
@@ -90,6 +99,76 @@ impl App {
             Message::OpenWebsite => {
                 let _ = open::that(WEBSITE_URL);
             }
+            Message::SelectInput => {
+                return Task::perform(
+                    async {
+                        rfd::AsyncFileDialog::new()
+                            .set_title("Select input file")
+                            .add_filter(
+                                "Media Files",
+                                &[
+                                    "mp4", "avi", "mov", "mkv", "jpg", "jpeg", "png", "bmp",
+                                    "tiff", "webp",
+                                ],
+                            )
+                            .pick_file()
+                            .await
+                            .map(|h| h.path().to_path_buf())
+                    },
+                    Message::InputSelected,
+                );
+            }
+            Message::InputSelected(Some(path)) => {
+                // Auto-generate output path: {stem}_blurred{ext}
+                let stem = path
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                let ext = path
+                    .extension()
+                    .map(|e| format!(".{}", e.to_string_lossy()))
+                    .unwrap_or_default();
+                let output = path.with_file_name(format!("{stem}_blurred{ext}"));
+                self.input_path = Some(path);
+                self.output_path = Some(output);
+            }
+            Message::InputSelected(None) => {}
+            Message::SelectOutput => {
+                let start_dir = self
+                    .output_path
+                    .as_ref()
+                    .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+                let start_name = self
+                    .output_path
+                    .as_ref()
+                    .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()));
+                return Task::perform(
+                    async move {
+                        let mut dialog = rfd::AsyncFileDialog::new()
+                            .set_title("Save output as")
+                            .add_filter(
+                                "Media Files",
+                                &[
+                                    "mp4", "avi", "mov", "mkv", "jpg", "jpeg", "png", "bmp",
+                                    "tiff", "webp",
+                                ],
+                            );
+                        if let Some(dir) = start_dir {
+                            dialog = dialog.set_directory(dir);
+                        }
+                        if let Some(name) = start_name {
+                            dialog = dialog.set_file_name(name);
+                        }
+                        dialog.save_file().await.map(|h| h.path().to_path_buf())
+                    },
+                    Message::OutputSelected,
+                );
+            }
+            Message::OutputSelected(Some(path)) => {
+                self.output_path = Some(path);
+            }
+            Message::OutputSelected(None) => {}
             Message::DetectorChanged(detector) => {
                 self.settings.detector = detector;
                 self.settings.save();
@@ -162,7 +241,9 @@ impl App {
 
         // Tab content
         let content: Element<'_, Message> = match self.active_tab {
-            Tab::Main => tabs::main_tab::view(fs),
+            Tab::Main => {
+                tabs::main_tab::view(fs, self.input_path.as_deref(), self.output_path.as_deref())
+            }
             Tab::Settings => tabs::settings_tab::view(&self.settings),
             Tab::Appearance => tabs::appearance_tab::view(&self.settings),
             Tab::Privacy => tabs::privacy_tab::view(fs),
