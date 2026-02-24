@@ -67,7 +67,7 @@ Entire separable Gaussian blur operates on f64. For 8-bit pixel processing, f32 
 
 ---
 
-### 8. Ellipse mask does per-pixel division
+### 8. ~~Ellipse mask does per-pixel division~~
 **File**: `crates/core/src/blurring/infrastructure/cpu_elliptical_blurrer.rs:83`
 
 Ellipse SDF computes `(dx/semi_a)^2 + (dy/semi_b)^2` with two divisions per pixel. For a 200x200 region, that's 40,000 divisions.

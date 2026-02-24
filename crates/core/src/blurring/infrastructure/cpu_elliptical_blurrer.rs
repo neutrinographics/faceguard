@@ -78,15 +78,18 @@ impl FrameBlurrer for CpuEllipticalBlurrer {
             // Get ellipse geometry from region
             let (ecx, ecy) = r.ellipse_center_in_roi();
             let (semi_a, semi_b) = r.ellipse_axes();
+            let inv_a_sq = if semi_a > 0.0 { 1.0 / (semi_a * semi_a) } else { 0.0 };
+            let inv_b_sq = if semi_b > 0.0 { 1.0 / (semi_b * semi_b) } else { 0.0 };
+            let ellipse_valid = semi_a > 0.0 && semi_b > 0.0;
 
             // Composite blurred pixels within ellipse mask back into frame
             for row in 0..rh {
                 for col in 0..rw {
-                    // Ellipse SDF: ((x-cx)/a)^2 + ((y-cy)/b)^2 <= 1
+                    // Ellipse SDF: (dx^2 * inv_a_sq) + (dy^2 * inv_b_sq) <= 1
                     let dx = col as f64 - ecx;
                     let dy = row as f64 - ecy;
-                    let ellipse_dist = if semi_a > 0.0 && semi_b > 0.0 {
-                        (dx / semi_a) * (dx / semi_a) + (dy / semi_b) * (dy / semi_b)
+                    let ellipse_dist = if ellipse_valid {
+                        dx * dx * inv_a_sq + dy * dy * inv_b_sq
                     } else {
                         f64::MAX
                     };
