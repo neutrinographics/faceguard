@@ -14,7 +14,7 @@ use crate::video::domain::video_reader::VideoReader;
 use crate::video::domain::video_writer::VideoWriter;
 
 /// Default bounded channel capacity for inter-thread communication.
-const DEFAULT_CHANNEL_CAPACITY: usize = 4;
+const DEFAULT_CHANNEL_CAPACITY: usize = 8;
 
 /// Executes the blur pipeline using dedicated threads for I/O, detection, and blurring.
 ///

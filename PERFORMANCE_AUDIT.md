@@ -158,7 +158,7 @@ Only `with_inter_threads(1)` is set. No `with_intra_threads()`, so CPU fallback 
 
 ---
 
-### 18. Channel capacity may be too small
+### 18. ~~Channel capacity may be too small~~
 **File**: `crates/core/src/pipeline/blur_faces_use_case.rs:20`
 
 `CHANNEL_CAPACITY = 4` may cause blocking if detection/blur times vary.
