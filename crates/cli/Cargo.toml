@@ -10,6 +10,9 @@ description = "CLI for face blurring in videos and images"
 name = "video-blur"
 path = "src/main.rs"
 
+[features]
+static-ffmpeg = ["video-blur-core/static-ffmpeg"]
+
 [dependencies]
 video-blur-core = { workspace = true }
 clap = { workspace = true }

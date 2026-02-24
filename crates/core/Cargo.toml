@@ -20,6 +20,9 @@ ffmpeg-next = { workspace = true }
 crossbeam-channel = { workspace = true }
 ort = { workspace = true }
 
+[features]
+static-ffmpeg = ["ffmpeg-next/build"]
+
 [dev-dependencies]
 rstest = { workspace = true }
 approx = { workspace = true }

@@ -69,24 +69,22 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
 
-      - name: Install FFmpeg (Ubuntu)
+      - name: Install build deps (Ubuntu)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libavfilter-dev libavdevice-dev pkg-config clang
+          sudo apt-get install -y nasm pkg-config clang
 
-      - name: Install FFmpeg (macOS)
+      - name: Install build deps (macOS)
         if: runner.os == 'macOS'
-        run: brew install ffmpeg pkg-config
+        run: brew install nasm pkg-config
 
-      - name: Install FFmpeg (Windows)
+      - name: Install build deps (Windows)
         if: runner.os == 'Windows'
-        run: |
-          choco install ffmpeg-full
-          echo "FFMPEG_DIR=C:\ProgramData\chocolatey\lib\ffmpeg-full\tools\ffmpeg" >> $env:GITHUB_ENV
+        run: choco install nasm
 
-      - name: Build release
-        run: cargo build --release --target ${{ matrix.target }} -p video-blur-desktop
+      - name: Build release (static FFmpeg)
+        run: cargo build --release --target ${{ matrix.target }} -p video-blur-desktop --features static-ffmpeg
 
       - name: Create macOS app bundle
         if: runner.os == 'macOS' && matrix.target == 'aarch64-apple-darwin'

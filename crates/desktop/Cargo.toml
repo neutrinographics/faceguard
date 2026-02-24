@@ -10,6 +10,9 @@ description = "Desktop GUI for face blurring in videos and images"
 name = "video-blur-desktop"
 path = "src/main.rs"
 
+[features]
+static-ffmpeg = ["video-blur-core/static-ffmpeg"]
+
 [dependencies]
 video-blur-core = { workspace = true }
 iced = { workspace = true }

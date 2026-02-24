@@ -2,8 +2,8 @@
 # Build a macOS .app bundle for Video Blur.
 # Usage: ./build_app.sh [--release]
 #
-# Bundles the binary, FFmpeg dylibs (and their transitive dependencies),
-# icons, and Info.plist into a self-contained .app.
+# Builds with static FFmpeg linking (no dylib bundling needed).
+# Icons and Info.plist are bundled into a self-contained .app.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -20,8 +20,8 @@ if [[ "${1:-}" == "--release" ]]; then
     CARGO_FLAGS="--release"
 fi
 
-echo "Building video-blur-desktop ($PROFILE)..."
-cargo build -p video-blur-desktop $CARGO_FLAGS
+echo "Building video-blur-desktop ($PROFILE) with static FFmpeg..."
+cargo build -p video-blur-desktop $CARGO_FLAGS --features static-ffmpeg
 
 echo "Creating app bundle..."
 rm -rf "$APP_DIR"
@@ -39,7 +39,8 @@ cp "$SCRIPT_DIR/assets/Info.plist" "$APP_DIR/Contents/"
 cp "$SCRIPT_DIR/assets/VideoBlur.icns" "$APP_DIR/Contents/Resources/"
 
 # ---------------------------------------------------------------------------
-# Bundle dylibs: collect all non-system dylibs transitively
+# Bundle any remaining non-system dylibs (e.g. ort/onnxruntime)
+# With static FFmpeg, most dylibs are eliminated, but other deps may remain.
 # ---------------------------------------------------------------------------
 
 # File to track already-processed dylibs
@@ -106,7 +107,7 @@ bundle_dylib() {
     done
 }
 
-echo "Collecting dylibs..."
+echo "Checking for non-system dylibs..."
 BINARY_IN_APP="$APP_DIR/Contents/MacOS/video-blur-desktop"
 
 # Get direct dependencies of the binary
@@ -128,7 +129,7 @@ install_name_tool -add_rpath "@executable_path/../Frameworks" "$BINARY_IN_APP" 2
 echo "Signing app bundle..."
 codesign --deep --force --sign - "$APP_DIR"
 
-DYLIB_COUNT="$(ls -1 "$FRAMEWORKS_DIR" | wc -l | tr -d ' ')"
+DYLIB_COUNT="$(ls -1 "$FRAMEWORKS_DIR" 2>/dev/null | wc -l | tr -d ' ')"
 echo ""
 echo "App bundle created at: $APP_DIR"
 echo "Bundled $DYLIB_COUNT dylibs into Frameworks/"
