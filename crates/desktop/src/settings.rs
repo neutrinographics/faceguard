@@ -10,7 +10,6 @@ pub enum Detector {
 }
 
 impl Detector {
-    #[allow(dead_code)]
     pub const ALL: &[Detector] = &[Detector::Yolo, Detector::Mediapipe];
 }
 
@@ -31,7 +30,6 @@ pub enum BlurShape {
 }
 
 impl BlurShape {
-    #[allow(dead_code)]
     pub const ALL: &[BlurShape] = &[BlurShape::Ellipse, BlurShape::Rect];
 }
 
@@ -113,14 +111,6 @@ impl Settings {
             if let Ok(json) = serde_json::to_string_pretty(self) {
                 let _ = fs::write(path, json);
             }
-        }
-    }
-
-    /// Ensure blur_strength is odd (required by GaussianBlur).
-    #[allow(dead_code)]
-    pub fn ensure_odd_blur_strength(&mut self) {
-        if self.blur_strength % 2 == 0 {
-            self.blur_strength += 1;
         }
     }
 }

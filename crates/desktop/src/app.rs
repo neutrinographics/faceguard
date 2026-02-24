@@ -3,7 +3,7 @@ use std::time::Duration;
 use iced::widget::{button, column, container, row, scrollable, text};
 use iced::{Element, Length, Subscription, Task, Theme};
 
-use crate::settings::{Appearance, Settings};
+use crate::settings::{Appearance, BlurShape, Detector, Settings};
 use crate::tabs;
 use crate::theme;
 
@@ -50,6 +50,12 @@ impl Tab {
 pub enum Message {
     TabSelected(Tab),
     OpenWebsite,
+    DetectorChanged(Detector),
+    BlurShapeChanged(BlurShape),
+    ConfidenceChanged(u32),
+    BlurStrengthChanged(u32),
+    LookaheadChanged(u32),
+    RestoreDefaults,
     AppearanceChanged(Appearance),
     HighContrastChanged(bool),
     FontScaleChanged(f32),
@@ -83,6 +89,36 @@ impl App {
             }
             Message::OpenWebsite => {
                 let _ = open::that(WEBSITE_URL);
+            }
+            Message::DetectorChanged(detector) => {
+                self.settings.detector = detector;
+                self.settings.save();
+            }
+            Message::BlurShapeChanged(shape) => {
+                self.settings.blur_shape = shape;
+                self.settings.save();
+            }
+            Message::ConfidenceChanged(val) => {
+                self.settings.confidence = val;
+                self.settings.save();
+            }
+            Message::BlurStrengthChanged(val) => {
+                // Ensure odd
+                self.settings.blur_strength = if val % 2 == 0 { val + 1 } else { val };
+                self.settings.save();
+            }
+            Message::LookaheadChanged(val) => {
+                self.settings.lookahead = val;
+                self.settings.save();
+            }
+            Message::RestoreDefaults => {
+                let defaults = Settings::default();
+                self.settings.detector = defaults.detector;
+                self.settings.blur_shape = defaults.blur_shape;
+                self.settings.confidence = defaults.confidence;
+                self.settings.blur_strength = defaults.blur_strength;
+                self.settings.lookahead = defaults.lookahead;
+                self.settings.save();
             }
             Message::AppearanceChanged(appearance) => {
                 self.settings.appearance = appearance;
@@ -127,7 +163,7 @@ impl App {
         // Tab content
         let content: Element<'_, Message> = match self.active_tab {
             Tab::Main => tabs::main_tab::view(fs),
-            Tab::Settings => tabs::settings_tab::view(fs),
+            Tab::Settings => tabs::settings_tab::view(&self.settings),
             Tab::Appearance => tabs::appearance_tab::view(&self.settings),
             Tab::Privacy => tabs::privacy_tab::view(fs),
             Tab::About => tabs::about_tab::view(fs),
