@@ -107,6 +107,8 @@ pub struct App {
     pub faces_well: FacesWellState,
     /// Cached detection results from preview pass (for reuse in blur).
     detection_cache: Option<Arc<HashMap<usize, Vec<Region>>>>,
+    /// Whether a GPU adapter is available for blur compute shaders.
+    gpu_available: bool,
     /// Pre-loaded model paths shared across workers.
     model_cache: Arc<ModelCache>,
     preview_rx: Option<Receiver<PreviewMessage>>,
@@ -125,6 +127,7 @@ impl App {
                 processing: ProcessingState::Idle,
                 faces_well: FacesWellState::new(),
                 detection_cache: None,
+                gpu_available: video_blur_core::blurring::infrastructure::blurrer_factory::gpu_available(),
                 model_cache: ModelCache::new(),
                 preview_rx: None,
                 worker_rx: None,
@@ -462,7 +465,7 @@ impl App {
                 &self.faces_well,
                 &current_theme,
             ),
-            Tab::Settings => tabs::settings_tab::view(&self.settings),
+            Tab::Settings => tabs::settings_tab::view(&self.settings, self.gpu_available),
             Tab::About => tabs::about_tab::view(fs),
         };
 
