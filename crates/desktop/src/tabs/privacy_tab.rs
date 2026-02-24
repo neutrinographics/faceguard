@@ -1,11 +1,11 @@
 use iced::widget::{column, text, Space};
 use iced::Element;
 
-use crate::app::Message;
+use crate::app::{scaled, Message};
 
-pub fn view<'a>() -> Element<'a, Message> {
+pub fn view(fs: f32) -> Element<'static, Message> {
     column![
-        text("Your data stays on your device").size(16),
+        text("Your data stays on your device").size(scaled(16.0, fs)),
         Space::new().height(8),
         text(
             "Video Blur processes everything locally on your computer. \
@@ -15,9 +15,9 @@ pub fn view<'a>() -> Element<'a, Message> {
              the app works entirely offline.\n\n\
              No analytics, no tracking, no cloud processing."
         )
-        .size(13),
+        .size(scaled(13.0, fs)),
         Space::new().height(20),
-        text("Blurring is permanent").size(16),
+        text("Blurring is permanent").size(scaled(16.0, fs)),
         Space::new().height(8),
         text(
             "Once a face is blurred, it cannot be unblurred. The original \
@@ -26,7 +26,7 @@ pub fn view<'a>() -> Element<'a, Message> {
              reason, always keep a copy of your original video or image if \
              you might need it later."
         )
-        .size(13),
+        .size(scaled(13.0, fs)),
     ]
     .spacing(0)
     .into()

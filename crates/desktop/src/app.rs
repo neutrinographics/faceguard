@@ -1,7 +1,11 @@
-use iced::widget::{button, column, container, row, scrollable, text};
-use iced::{Element, Length, Task, Theme};
+use std::time::Duration;
 
+use iced::widget::{button, column, container, row, scrollable, text};
+use iced::{Element, Length, Subscription, Task, Theme};
+
+use crate::settings::{Appearance, Settings};
 use crate::tabs;
+use crate::theme;
 
 const WEBSITE_URL: &str = "https://www.neutrinographics.com/";
 
@@ -13,7 +17,7 @@ const WEBSITE_URL: &str = "https://www.neutrinographics.com/";
 pub enum Tab {
     Main,
     Settings,
-    Accessibility,
+    Appearance,
     Privacy,
     About,
 }
@@ -22,7 +26,7 @@ impl Tab {
     const ALL: &[Tab] = &[
         Tab::Main,
         Tab::Settings,
-        Tab::Accessibility,
+        Tab::Appearance,
         Tab::Privacy,
         Tab::About,
     ];
@@ -31,7 +35,7 @@ impl Tab {
         match self {
             Tab::Main => "Main",
             Tab::Settings => "Settings",
-            Tab::Accessibility => "Accessibility",
+            Tab::Appearance => "Appearance",
             Tab::Privacy => "Privacy",
             Tab::About => "About",
         }
@@ -46,6 +50,10 @@ impl Tab {
 pub enum Message {
     TabSelected(Tab),
     OpenWebsite,
+    AppearanceChanged(Appearance),
+    HighContrastChanged(bool),
+    FontScaleChanged(f32),
+    PollSystemTheme,
 }
 
 // ---------------------------------------------------------------------------
@@ -54,6 +62,7 @@ pub enum Message {
 
 pub struct App {
     active_tab: Tab,
+    pub settings: Settings,
 }
 
 impl App {
@@ -61,6 +70,7 @@ impl App {
         (
             Self {
                 active_tab: Tab::Main,
+                settings: Settings::load(),
             },
             Task::none(),
         )
@@ -74,16 +84,34 @@ impl App {
             Message::OpenWebsite => {
                 let _ = open::that(WEBSITE_URL);
             }
+            Message::AppearanceChanged(appearance) => {
+                self.settings.appearance = appearance;
+                self.settings.save();
+            }
+            Message::HighContrastChanged(enabled) => {
+                self.settings.high_contrast = enabled;
+                self.settings.save();
+            }
+            Message::FontScaleChanged(scale) => {
+                self.settings.font_scale = scale;
+                self.settings.save();
+            }
+            Message::PollSystemTheme => {
+                // Theme is resolved fresh in theme() on every render,
+                // so just requesting a redraw is enough.
+            }
         }
         Task::none()
     }
 
     pub fn view(&self) -> Element<'_, Message> {
+        let fs = self.settings.font_scale;
+
         // Tab bar
         let tab_bar = row(Tab::ALL
             .iter()
             .map(|&tab| {
-                let label = text(tab.label()).size(13);
+                let label = text(tab.label()).size(scaled(13.0, fs));
                 let btn = button(label)
                     .on_press(Message::TabSelected(tab))
                     .padding([6, 14]);
@@ -97,12 +125,12 @@ impl App {
         .spacing(2);
 
         // Tab content
-        let content: Element<Message> = match self.active_tab {
-            Tab::Main => tabs::main_tab::view(),
-            Tab::Settings => tabs::settings_tab::view(),
-            Tab::Accessibility => tabs::accessibility_tab::view(),
-            Tab::Privacy => tabs::privacy_tab::view(),
-            Tab::About => tabs::about_tab::view(),
+        let content: Element<'_, Message> = match self.active_tab {
+            Tab::Main => tabs::main_tab::view(fs),
+            Tab::Settings => tabs::settings_tab::view(fs),
+            Tab::Appearance => tabs::appearance_tab::view(&self.settings),
+            Tab::Privacy => tabs::privacy_tab::view(fs),
+            Tab::About => tabs::about_tab::view(fs),
         };
 
         let tab_content = container(scrollable(content).height(Length::Fill))
@@ -111,7 +139,7 @@ impl App {
 
         // Footer
         let footer = container(
-            button(text("neutrinographics.com").size(11))
+            button(text("neutrinographics.com").size(scaled(11.0, fs)))
                 .on_press(Message::OpenWebsite)
                 .style(button::text),
         )
@@ -126,6 +154,19 @@ impl App {
     }
 
     pub fn theme(&self) -> Theme {
-        Theme::Dark
+        theme::resolve_theme(self.settings.appearance, self.settings.high_contrast)
     }
+
+    pub fn subscription(&self) -> Subscription<Message> {
+        if self.settings.appearance == Appearance::System {
+            iced::time::every(Duration::from_secs(2)).map(|_| Message::PollSystemTheme)
+        } else {
+            Subscription::none()
+        }
+    }
+}
+
+/// Scale a base font size by the user's font_scale setting.
+pub fn scaled(base: f32, font_scale: f32) -> f32 {
+    (base * font_scale).round()
 }
