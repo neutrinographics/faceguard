@@ -1,10 +1,9 @@
 use ndarray::{ArrayView3, ArrayViewMut3};
 
-/// A single video/image frame with pixel data and sequence index.
+/// A single video/image frame: contiguous RGB bytes in row-major order.
 ///
-/// Data is stored as contiguous RGB bytes in row-major order.
-/// The domain layer treats pixel data as opaque — format conversion
-/// happens at I/O boundaries only.
+/// Format conversion happens at I/O boundaries only; the domain layer
+/// treats pixel data as opaque.
 #[derive(Clone, Debug)]
 pub struct Frame {
     data: Vec<u8>,
@@ -54,25 +53,22 @@ impl Frame {
         self.index
     }
 
-    /// View pixel data as a 3D array (height, width, channels).
     pub fn as_ndarray(&self) -> ArrayView3<'_, u8> {
-        let shape = (
-            self.height as usize,
-            self.width as usize,
-            self.channels as usize,
-        );
-        ArrayView3::from_shape(shape, &self.data).expect("Frame data length must match dimensions")
+        ArrayView3::from_shape(self.shape(), &self.data)
+            .expect("Frame data length must match dimensions")
     }
 
-    /// Mutable view of pixel data as a 3D array (height, width, channels).
     pub fn as_ndarray_mut(&mut self) -> ArrayViewMut3<'_, u8> {
-        let shape = (
+        ArrayViewMut3::from_shape(self.shape(), &mut self.data)
+            .expect("Frame data length must match dimensions")
+    }
+
+    fn shape(&self) -> (usize, usize, usize) {
+        (
             self.height as usize,
             self.width as usize,
             self.channels as usize,
-        );
-        ArrayViewMut3::from_shape(shape, &mut self.data)
-            .expect("Frame data length must match dimensions")
+        )
     }
 }
 

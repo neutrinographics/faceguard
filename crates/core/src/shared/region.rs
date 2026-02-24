@@ -1,19 +1,18 @@
 use std::collections::HashSet;
 
-/// A blur target region with edge-aware rendering support.
+pub const DEFAULT_IOU_THRESHOLD: f64 = 0.3;
+
+/// A blur target region with edge-aware ellipse rendering support.
 ///
-/// Stores both clamped (visible) and unclamped (full) dimensions so
+/// Carries both clamped (visible) and unclamped (full) geometry so
 /// ellipses slide off frame edges naturally instead of shrinking.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Region {
-    /// Clamped visible area within the frame.
     pub x: i32,
     pub y: i32,
     pub width: i32,
     pub height: i32,
-    /// Optional persistent tracking identifier.
     pub track_id: Option<u32>,
-    /// Unclamped (pre-clip) dimensions for ellipse rendering.
     pub full_width: Option<i32>,
     pub full_height: Option<i32>,
     pub unclamped_x: Option<i32>,
@@ -21,76 +20,9 @@ pub struct Region {
 }
 
 impl Region {
-    /// Ellipse center relative to the clamped ROI.
-    ///
-    /// When the region is clipped at a frame edge, the center shifts so
-    /// the ellipse extends naturally off-screen rather than shrinking.
-    pub fn ellipse_center_in_roi(&self) -> (f64, f64) {
-        let fw = self.full_width.unwrap_or(self.width);
-        let fh = self.full_height.unwrap_or(self.height);
-        let ux = self.unclamped_x.unwrap_or(self.x);
-        let uy = self.unclamped_y.unwrap_or(self.y);
-        let center_x = (fw as f64) / 2.0 - (self.x - ux) as f64;
-        let center_y = (fh as f64) / 2.0 - (self.y - uy) as f64;
-        (center_x, center_y)
-    }
-
-    /// Ellipse semi-axes using full (unclamped) dimensions.
-    pub fn ellipse_axes(&self) -> (f64, f64) {
-        let fw = self.full_width.unwrap_or(self.width);
-        let fh = self.full_height.unwrap_or(self.height);
-        (fw as f64 / 2.0, fh as f64 / 2.0)
-    }
-
-    /// Intersection-over-Union with another region.
-    pub fn iou(&self, other: &Region) -> f64 {
-        let ax2 = self.x + self.width;
-        let ay2 = self.y + self.height;
-        let bx2 = other.x + other.width;
-        let by2 = other.y + other.height;
-
-        let ix1 = self.x.max(other.x);
-        let iy1 = self.y.max(other.y);
-        let ix2 = ax2.min(bx2);
-        let iy2 = ay2.min(by2);
-
-        let inter = (ix2 - ix1).max(0) as f64 * (iy2 - iy1).max(0) as f64;
-        if inter == 0.0 {
-            return 0.0;
-        }
-
-        let area_a = self.width as f64 * self.height as f64;
-        let area_b = other.width as f64 * other.height as f64;
-        inter / (area_a + area_b - inter)
-    }
-
-    /// Greedy deduplication by IoU.
-    ///
-    /// Iterates through regions in order, keeping a region only if its IoU
-    /// with ALL previously-kept regions is <= `iou_threshold`.
-    pub fn deduplicate(regions: &[Region], iou_threshold: f64) -> Vec<Region> {
-        if regions.len() <= 1 {
-            return regions.to_vec();
-        }
-        let mut kept: Vec<Region> = Vec::with_capacity(regions.len());
-        for r in regions {
-            let dominated = kept.iter().any(|k| r.iou(k) > iou_threshold);
-            if !dominated {
-                kept.push(r.clone());
-            }
-        }
-        kept
-    }
-
     /// Filters regions by track ID inclusion/exclusion sets.
     ///
-    /// **Priority rule:** `blur_ids` takes absolute precedence over `exclude_ids`.
-    /// - If `blur_ids` is Some: keep only regions with `track_id` in the set.
-    /// - Else if `exclude_ids` is Some: keep regions with `track_id` NOT in the set.
-    /// - Else: keep all regions.
-    ///
-    /// Regions with `track_id = None` are excluded when `blur_ids` is set,
-    /// and included when `exclude_ids` is set.
+    /// `blur_ids` takes precedence: when set, only matching track IDs pass.
     pub fn filter(
         regions: &[Region],
         blur_ids: Option<&HashSet<u32>>,
@@ -112,10 +44,64 @@ impl Region {
             regions.to_vec()
         }
     }
-}
 
-/// Default IoU threshold for deduplication.
-pub const DEFAULT_IOU_THRESHOLD: f64 = 0.3;
+    /// Greedy deduplication: keeps a region only if its IoU with every
+    /// previously-kept region is at or below the threshold.
+    pub fn deduplicate(regions: &[Region], iou_threshold: f64) -> Vec<Region> {
+        if regions.len() <= 1 {
+            return regions.to_vec();
+        }
+        let mut kept: Vec<Region> = Vec::with_capacity(regions.len());
+        for r in regions {
+            let dominated = kept.iter().any(|k| r.iou(k) > iou_threshold);
+            if !dominated {
+                kept.push(r.clone());
+            }
+        }
+        kept
+    }
+
+    pub fn iou(&self, other: &Region) -> f64 {
+        let ix1 = self.x.max(other.x);
+        let iy1 = self.y.max(other.y);
+        let ix2 = (self.x + self.width).min(other.x + other.width);
+        let iy2 = (self.y + self.height).min(other.y + other.height);
+
+        let inter = (ix2 - ix1).max(0) as f64 * (iy2 - iy1).max(0) as f64;
+        if inter == 0.0 {
+            return 0.0;
+        }
+
+        let area_a = self.width as f64 * self.height as f64;
+        let area_b = other.width as f64 * other.height as f64;
+        inter / (area_a + area_b - inter)
+    }
+
+    /// Ellipse center relative to the clamped ROI.
+    ///
+    /// When clipped at a frame edge, the center shifts so the ellipse
+    /// extends naturally off-screen rather than collapsing inward.
+    pub fn ellipse_center_in_roi(&self) -> (f64, f64) {
+        let (fw, fh, ux, uy) = self.unclamped_geometry();
+        let center_x = (fw as f64) / 2.0 - (self.x - ux) as f64;
+        let center_y = (fh as f64) / 2.0 - (self.y - uy) as f64;
+        (center_x, center_y)
+    }
+
+    pub fn ellipse_axes(&self) -> (f64, f64) {
+        let (fw, fh, _, _) = self.unclamped_geometry();
+        (fw as f64 / 2.0, fh as f64 / 2.0)
+    }
+
+    fn unclamped_geometry(&self) -> (i32, i32, i32, i32) {
+        (
+            self.full_width.unwrap_or(self.width),
+            self.full_height.unwrap_or(self.height),
+            self.unclamped_x.unwrap_or(self.x),
+            self.unclamped_y.unwrap_or(self.y),
+        )
+    }
+}
 
 #[cfg(test)]
 mod tests {

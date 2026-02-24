@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-/// Immutable metadata describing a video or image source.
 #[derive(Clone, Debug, PartialEq)]
 pub struct VideoMetadata {
     pub width: u32,
