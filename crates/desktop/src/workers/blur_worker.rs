@@ -112,8 +112,12 @@ fn run_blur(
             let region_builder =
                 FaceRegionBuilder::new(DEFAULT_PADDING, Some(Box::new(smoother)));
             let tracker = ByteTracker::new(TRACKER_MAX_LOST);
-            let det =
-                OnnxYoloDetector::new(&model_path, region_builder, tracker, confidence)?;
+            let det = match params.model_cache.get_yolo_session() {
+                Some((session, input_size)) => OnnxYoloDetector::from_shared_session(
+                    session, input_size, region_builder, tracker, confidence,
+                ),
+                None => OnnxYoloDetector::new(&model_path, region_builder, tracker, confidence)?,
+            };
             Box::new(SkipFrameDetector::new(Box::new(det), 2)?)
         };
 

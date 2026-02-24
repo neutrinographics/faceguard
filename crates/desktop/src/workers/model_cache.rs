@@ -5,15 +5,18 @@ use std::thread;
 use std::time::Duration;
 
 use video_blur_core::detection::infrastructure::model_resolver;
+use video_blur_core::detection::infrastructure::onnx_yolo_detector;
 use video_blur_core::shared::constants::{
     EMBEDDING_MODEL_NAME, EMBEDDING_MODEL_URL, YOLO_MODEL_NAME, YOLO_MODEL_URL,
 };
 
-/// Shared model cache that resolves models in the background at startup.
-/// Workers can grab pre-resolved paths or wait for in-progress resolution.
+/// Shared model cache that resolves models and pre-builds ONNX sessions
+/// in the background at startup. Workers can grab pre-built sessions or
+/// fall back to building from the cached path.
 pub struct ModelCache {
-    yolo: Arc<ModelSlot>,
-    embedding: Arc<ModelSlot>,
+    yolo_path: Arc<ModelSlot>,
+    embedding_path: Arc<ModelSlot>,
+    yolo_session: Arc<SessionSlot>,
 }
 
 struct ModelSlot {
@@ -22,19 +25,44 @@ struct ModelSlot {
     progress: Arc<Mutex<(u64, u64)>>,
 }
 
+struct SessionSlot {
+    session: Mutex<Option<Arc<Mutex<ort::session::Session>>>>,
+    input_size: Mutex<u32>,
+    ready: Condvar,
+    /// Set to true once the first build attempt completes (success or failure).
+    built: Mutex<bool>,
+}
+
 impl ModelCache {
     /// Create a new `ModelCache` and begin resolving models in the background.
     pub fn new() -> Arc<Self> {
         let cache = Arc::new(Self {
-            yolo: Arc::new(ModelSlot::new()),
-            embedding: Arc::new(ModelSlot::new()),
+            yolo_path: Arc::new(ModelSlot::new()),
+            embedding_path: Arc::new(ModelSlot::new()),
+            yolo_session: Arc::new(SessionSlot::new()),
         });
 
-        let yolo_slot = cache.yolo.clone();
-        let embedding_slot = cache.embedding.clone();
+        let yolo_path_slot = cache.yolo_path.clone();
+        let embedding_path_slot = cache.embedding_path.clone();
+        let session_slot = cache.yolo_session.clone();
         thread::spawn(move || {
-            yolo_slot.resolve(YOLO_MODEL_NAME, YOLO_MODEL_URL);
-            embedding_slot.resolve(EMBEDDING_MODEL_NAME, EMBEDDING_MODEL_URL);
+            // Resolve YOLO model path (may download)
+            yolo_path_slot.resolve(YOLO_MODEL_NAME, YOLO_MODEL_URL);
+
+            // Pre-build the ONNX session from the resolved path
+            if let Some(Ok(ref path)) = *yolo_path_slot.result.lock().unwrap() {
+                if let Ok(session) = onnx_yolo_detector::OnnxYoloDetector::build_session(path) {
+                    let input_size = onnx_yolo_detector::session_input_size(&session);
+                    *session_slot.input_size.lock().unwrap() = input_size;
+                    *session_slot.session.lock().unwrap() =
+                        Some(Arc::new(Mutex::new(session)));
+                }
+            }
+            *session_slot.built.lock().unwrap() = true;
+            session_slot.ready.notify_all();
+
+            // Resolve embedding model path
+            embedding_path_slot.resolve(EMBEDDING_MODEL_NAME, EMBEDDING_MODEL_URL);
         });
 
         cache
@@ -47,7 +75,28 @@ impl ModelCache {
         on_progress: &dyn Fn(u64, u64),
         cancelled: &AtomicBool,
     ) -> Result<PathBuf, String> {
-        self.yolo.wait(on_progress, cancelled)
+        self.yolo_path.wait(on_progress, cancelled)
+    }
+
+    /// Get the shared YOLO ONNX session, waiting for it to be ready.
+    /// Returns `None` only if the build failed. The `Arc` can be cloned freely;
+    /// every worker shares the same underlying session.
+    pub fn get_yolo_session(&self) -> Option<(Arc<Mutex<ort::session::Session>>, u32)> {
+        // Wait for the initial build to complete
+        let mut built = self.yolo_session.built.lock().unwrap();
+        while !*built {
+            let (new_guard, _) = self
+                .yolo_session
+                .ready
+                .wait_timeout(built, Duration::from_millis(100))
+                .unwrap();
+            built = new_guard;
+        }
+        drop(built);
+
+        let session = self.yolo_session.session.lock().unwrap().clone();
+        let input_size = *self.yolo_session.input_size.lock().unwrap();
+        session.map(|s| (s, input_size))
     }
 
     /// Wait for the embedding model path.
@@ -56,7 +105,7 @@ impl ModelCache {
         on_progress: &dyn Fn(u64, u64),
         cancelled: &AtomicBool,
     ) -> Result<PathBuf, String> {
-        self.embedding.wait(on_progress, cancelled)
+        self.embedding_path.wait(on_progress, cancelled)
     }
 }
 
@@ -108,6 +157,17 @@ impl ModelSlot {
                 .wait_timeout(guard, Duration::from_millis(100))
                 .unwrap();
             guard = new_guard;
+        }
+    }
+}
+
+impl SessionSlot {
+    fn new() -> Self {
+        Self {
+            session: Mutex::new(None),
+            input_size: Mutex::new(0),
+            ready: Condvar::new(),
+            built: Mutex::new(false),
         }
     }
 }

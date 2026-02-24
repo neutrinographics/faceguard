@@ -3,6 +3,7 @@
 /// Handles letterbox preprocessing, inference, NMS post-processing, ByteTrack
 /// tracking, and region building through the domain's `FaceRegionBuilder`.
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use crate::detection::domain::face_detector::FaceDetector;
 use crate::detection::domain::face_landmarks::FaceLandmarks;
@@ -29,11 +30,31 @@ const KEYPOINT_CONF_THRESH: f64 = 0.5;
 
 /// YOLO face detector backed by an ONNX Runtime session.
 pub struct OnnxYoloDetector {
-    session: ort::session::Session,
+    session: Arc<Mutex<ort::session::Session>>,
     region_builder: FaceRegionBuilder,
     tracker: ByteTracker,
     confidence: f64,
     input_size: u32,
+}
+
+/// Extract the model input resolution from an ONNX session.
+/// Falls back to `DEFAULT_INPUT_SIZE` if the shape is dynamic or unreadable.
+pub fn session_input_size(session: &ort::session::Session) -> u32 {
+    session
+        .inputs()
+        .first()
+        .and_then(|input| {
+            if let ort::value::ValueType::Tensor { ref shape, .. } = input.dtype() {
+                if shape.len() >= 4 && shape[2] > 0 {
+                    Some(shape[2] as u32)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .unwrap_or(DEFAULT_INPUT_SIZE)
 }
 
 impl OnnxYoloDetector {
@@ -47,6 +68,24 @@ impl OnnxYoloDetector {
         tracker: ByteTracker,
         confidence: f64,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        let session = Self::build_session(model_path)?;
+        let input_size = session_input_size(&session);
+        Ok(Self {
+            session: Arc::new(Mutex::new(session)),
+            region_builder,
+            tracker,
+            confidence,
+            input_size,
+        })
+    }
+
+    /// Build an ONNX Runtime session from a model file.
+    ///
+    /// This is the expensive operation that can be performed ahead of time
+    /// (e.g. at app startup) so that detector construction is instant.
+    pub fn build_session(
+        model_path: &Path,
+    ) -> Result<ort::session::Session, Box<dyn std::error::Error>> {
         let session = ort::session::Session::builder()?
             .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)?
             .with_inter_threads(1)?
@@ -54,32 +93,26 @@ impl OnnxYoloDetector {
                 ort::execution_providers::CoreMLExecutionProvider::default().build(),
             ])?
             .commit_from_file(model_path)?;
+        Ok(session)
+    }
 
-        // Try to read input size from model metadata (NCHW: [1, 3, H, W])
-        let input_size = session
-            .inputs()
-            .first()
-            .and_then(|input| {
-                if let ort::value::ValueType::Tensor { ref shape, .. } = input.dtype() {
-                    // shape is [N, C, H, W] — use H (they should be equal for square input)
-                    if shape.len() >= 4 && shape[2] > 0 {
-                        Some(shape[2] as u32)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(DEFAULT_INPUT_SIZE);
-
-        Ok(Self {
+    /// Create a detector from a pre-built shared ONNX session.
+    ///
+    /// `input_size` should be computed via [`session_input_size()`] at build time.
+    pub fn from_shared_session(
+        session: Arc<Mutex<ort::session::Session>>,
+        input_size: u32,
+        region_builder: FaceRegionBuilder,
+        tracker: ByteTracker,
+        confidence: f64,
+    ) -> Self {
+        Self {
             session,
             region_builder,
             tracker,
             confidence,
             input_size,
-        })
+        }
     }
 }
 
@@ -91,14 +124,23 @@ impl FaceDetector for OnnxYoloDetector {
         // 1. Preprocess: letterbox + normalize → NCHW float32
         let (input_tensor, scale, pad_x, pad_y) = letterbox(frame, self.input_size);
 
-        // 2. Inference
+        // 2. Inference (lock session, extract tensor data, then release)
         let input_value = ort::value::Tensor::from_array(input_tensor)?;
-        let outputs = self.session.run(ort::inputs![input_value])?;
-        if outputs.len() == 0 {
-            return Err("YOLO model produced no outputs".into());
-        }
-        let tensor = outputs[0].try_extract_array::<f32>()?;
-        let shape = tensor.shape();
+        let (data_vec, shape_vec) = {
+            let mut session = self
+                .session
+                .lock()
+                .map_err(|e| format!("Session lock poisoned: {e}"))?;
+            let outputs = session.run(ort::inputs![input_value])?;
+            if outputs.len() == 0 {
+                return Err("YOLO model produced no outputs".into());
+            }
+            let tensor = outputs[0].try_extract_array::<f32>()?;
+            let shape = tensor.shape().to_vec();
+            let data = tensor.as_slice().ok_or("Cannot get tensor slice")?.to_vec();
+            (data, shape)
+        };
+        let shape = &shape_vec;
 
         // YOLO output shape is [1, num_features, num_detections] (transposed)
         // or [1, num_detections, num_features]. Handle both.
@@ -113,7 +155,7 @@ impl FaceDetector for OnnxYoloDetector {
             return Err(format!("Unexpected YOLO output shape: {shape:?}").into());
         };
 
-        let data = tensor.as_slice().ok_or("Cannot get tensor slice")?;
+        let data = &data_vec;
         let transposed = shape.len() == 3 && shape[1] < shape[2];
 
         // 3. Parse detections
