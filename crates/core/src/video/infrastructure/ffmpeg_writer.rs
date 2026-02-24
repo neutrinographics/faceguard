@@ -4,6 +4,8 @@ use crate::shared::frame::Frame;
 use crate::shared::video_metadata::VideoMetadata;
 use crate::video::domain::video_writer::VideoWriter;
 
+pub const DEFAULT_CRF: u32 = 18;
+
 /// Encodes video frames via ffmpeg-next with built-in audio muxing.
 ///
 /// When the source video has an audio stream, it is copied directly
@@ -17,6 +19,7 @@ pub struct FfmpegWriter {
     width: u32,
     height: u32,
     fps: i32,
+    crf: u32,
     frame_count: usize,
     video_stream_index: usize,
     audio_source_stream_idx: Option<usize>,
@@ -39,12 +42,18 @@ impl FfmpegWriter {
             width: 0,
             height: 0,
             fps: 30,
+            crf: DEFAULT_CRF,
             frame_count: 0,
             video_stream_index: 0,
             audio_source_stream_idx: None,
             audio_output_stream_idx: None,
             audio_source_time_base: None,
         }
+    }
+
+    pub fn with_crf(mut self, crf: u32) -> Self {
+        self.crf = crf;
+        self
     }
 }
 
@@ -70,7 +79,7 @@ impl VideoWriter for FfmpegWriter {
 
         let mut octx = ffmpeg_next::format::output(path)?;
 
-        let encoder = create_video_encoder(&mut octx, metadata, self.fps)?;
+        let encoder = create_video_encoder(&mut octx, metadata, self.fps, self.crf)?;
 
         self.video_stream_index = 0;
 
@@ -168,6 +177,7 @@ fn create_video_encoder(
     octx: &mut ffmpeg_next::format::context::Output,
     metadata: &VideoMetadata,
     fps: i32,
+    crf: u32,
 ) -> Result<ffmpeg_next::codec::encoder::video::Encoder, Box<dyn std::error::Error>> {
     let global_header = octx
         .format()
@@ -195,7 +205,9 @@ fn create_video_encoder(
         encoder_ctx.set_flags(ffmpeg_next::codec::Flags::GLOBAL_HEADER);
     }
 
-    let encoder = encoder_ctx.open_with(ffmpeg_next::Dictionary::new())?;
+    let mut opts = ffmpeg_next::Dictionary::new();
+    opts.set("crf", &crf.to_string());
+    let encoder = encoder_ctx.open_with(opts)?;
     ost.set_parameters(&encoder);
 
     Ok(encoder)

@@ -43,6 +43,7 @@ video-blur input.mp4 output.mp4 --exclude-ids 2
 | `--preview <dir>` | — | Save face crop thumbnails to directory instead of blurring |
 | `--blur-ids` | — | Only blur these track IDs (comma-separated, mutually exclusive with `--exclude-ids`) |
 | `--exclude-ids` | — | Blur all faces except these track IDs (comma-separated) |
+| `--quality` | 18 | H.264 CRF quality (0=lossless, 51=worst) |
 
 ## Wiring
 

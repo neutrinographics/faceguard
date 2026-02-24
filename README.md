@@ -74,6 +74,7 @@ cargo run -p video-blur-desktop --release
 | `--preview <dir>` | — | Save face crops instead of blurring |
 | `--blur-ids` | — | Only blur these track IDs (comma-separated) |
 | `--exclude-ids` | — | Blur all faces except these (comma-separated) |
+| `--quality` | 18 | H.264 CRF quality (0=lossless, 51=worst) |
 
 ## Project Structure
 

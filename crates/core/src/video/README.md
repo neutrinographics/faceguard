@@ -19,7 +19,7 @@ Writes a single frame to an image file with optional resize. Used by `PreviewFac
 Wraps `ffmpeg-next` for video decoding. Converts frames from native pixel format (typically YUV420p) to RGB at the I/O boundary. Returns `VideoMetadata` including codec, dimensions, FPS, and frame count.
 
 ### FfmpegWriter
-Wraps `ffmpeg-next` for video encoding. Converts RGB frames back to YUV420p for H.264 encoding. On `close()`, copies the audio stream from the source file (if present) by invoking ffmpeg's muxer.
+Wraps `ffmpeg-next` for video encoding. Converts RGB frames back to YUV420p for H.264 encoding (CRF 18 by default, configurable via `with_crf()`). On `close()`, copies the audio stream from the source file (if present) by invoking ffmpeg's muxer.
 
 ### ImageFileReader
 Reads a single image file as a one-frame video source. Uses `ffmpeg-next` for decoding to maintain consistent RGB conversion across formats.

@@ -70,6 +70,10 @@ struct Cli {
     /// Blur all faces except these track IDs (comma-separated).
     #[arg(long, value_delimiter = ',')]
     exclude_ids: Option<Vec<u32>>,
+
+    /// H.264 CRF quality (0=lossless, 51=worst, default 18).
+    #[arg(long)]
+    quality: Option<u32>,
 }
 
 fn main() {
@@ -92,6 +96,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let lookahead = cli.lookahead;
     let blur_ids = to_id_set(cli.blur_ids);
     let exclude_ids = to_id_set(cli.exclude_ids);
+    let quality = cli.quality;
 
     if let Some(preview_dir) = cli.preview {
         run_preview(&input, &preview_dir, detector)?;
@@ -113,6 +118,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             blurrer,
             blur_ids,
             exclude_ids,
+            quality,
         )?;
     }
 
@@ -168,6 +174,7 @@ fn run_image_blur(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_video_blur(
     input: &Path,
     output: &Path,
@@ -176,10 +183,15 @@ fn run_video_blur(
     blurrer: Box<dyn FrameBlurrer>,
     blur_ids: Option<HashSet<u32>>,
     exclude_ids: Option<HashSet<u32>>,
+    quality: Option<u32>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut reader: Box<dyn VideoReader> = Box::new(FfmpegReader::new());
     let metadata = reader.open(input)?;
-    let writer: Box<dyn VideoWriter> = Box::new(FfmpegWriter::new());
+    let ffmpeg_writer = match quality {
+        Some(crf) => FfmpegWriter::new().with_crf(crf),
+        None => FfmpegWriter::new(),
+    };
+    let writer: Box<dyn VideoWriter> = Box::new(ffmpeg_writer);
 
     let total = metadata.total_frames;
     let progress: Box<dyn Fn(usize, usize) -> bool + Send> = Box::new(move |current, _| {
@@ -256,6 +268,11 @@ fn validate(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
             cli.confidence
         )
         .into());
+    }
+    if let Some(q) = cli.quality {
+        if q > 51 {
+            return Err(format!("Quality must be between 0 and 51, got {q}").into());
+        }
     }
     if cli.blur_shape != "ellipse" && cli.blur_shape != "rect" {
         return Err(format!(
