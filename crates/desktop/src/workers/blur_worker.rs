@@ -17,18 +17,14 @@ use video_blur_core::detection::infrastructure::onnx_yolo_detector::OnnxYoloDete
 use video_blur_core::detection::infrastructure::skip_frame_detector::SkipFrameDetector;
 use video_blur_core::pipeline::blur_faces_use_case::BlurFacesUseCase;
 use video_blur_core::pipeline::blur_image_use_case::BlurImageUseCase;
+use video_blur_core::shared::constants::{
+    IMAGE_EXTENSIONS, TRACKER_MAX_LOST, YOLO_MODEL_NAME, YOLO_MODEL_URL,
+};
 use video_blur_core::shared::region::Region;
 use video_blur_core::video::infrastructure::ffmpeg_reader::FfmpegReader;
 use video_blur_core::video::infrastructure::ffmpeg_writer::FfmpegWriter;
 use video_blur_core::video::infrastructure::image_file_reader::ImageFileReader;
 use video_blur_core::video::infrastructure::image_file_writer::ImageFileWriter;
-
-const YOLO_MODEL_NAME: &str = "yolo11n-pose_widerface.onnx";
-const YOLO_MODEL_URL: &str =
-    "https://github.com/da1nerd/video-blur/releases/download/v0.1.0/yolo11n-pose_widerface.onnx";
-
-const TRACKER_MAX_LOST: usize = 30;
-const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "bmp", "tiff", "tif", "webp"];
 
 /// Messages sent from the worker thread to the UI.
 #[derive(Debug, Clone)]

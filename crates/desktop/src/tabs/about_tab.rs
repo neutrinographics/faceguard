@@ -6,10 +6,7 @@ use crate::theme::{muted_color, section_color};
 
 pub fn view(fs: f32) -> Element<'static, Message> {
     let version = env!("CARGO_PKG_VERSION");
-    let theme = crate::theme::resolve_theme(
-        crate::settings::Appearance::System,
-        false,
-    );
+    let theme = crate::theme::resolve_theme(crate::settings::Appearance::System, false);
     let muted = muted_color(&theme);
     let section = section_color(&theme);
 
@@ -21,9 +18,9 @@ pub fn view(fs: f32) -> Element<'static, Message> {
         text("Made by Neutrino Graphics LLC").size(scaled(14.0, fs)),
         Space::new().height(16),
         text(
-            "We partner with mission-driven organizations to build software \
-             that works the way you do\u{2014}so you can focus on the work that \
-             matters most."
+            "We help ministries and mission-driven organizations advance the \
+             gospel by building innovative software platforms that improve how \
+             they operate, disciple, and measure impact."
         )
         .size(scaled(14.0, fs)),
         Space::new().height(16),
@@ -46,13 +43,15 @@ pub fn view(fs: f32) -> Element<'static, Message> {
         )
         .size(scaled(14.0, fs)),
         Space::new().height(16),
-        text("\u{26A0} Blurring is permanent \u{2014} once a face is blurred, \
+        text(
+            "\u{26A0} Blurring is permanent \u{2014} once a face is blurred, \
              it cannot be unblurred. The original pixels are permanently \
              replaced, so there is no way for anyone to recover the hidden \
              faces from the output file. Always keep a copy of your original \
-             video or image if you might need it later.")
-            .size(scaled(14.0, fs))
-            .color(muted),
+             video or image if you might need it later."
+        )
+        .size(scaled(14.0, fs))
+        .color(muted),
     ]
     .spacing(0)
     .into()
