@@ -178,7 +178,7 @@ Only `with_inter_threads(1)` is set. No `with_intra_threads()`, so CPU fallback 
 
 ---
 
-### 20. Only CoreML EP configured for ONNX
+### 20. ~~Only CoreML EP configured for ONNX~~
 **File**: `crates/core/src/detection/infrastructure/onnx_yolo_detector.rs:92`
 
 No GPU acceleration on Linux/Windows. Falls back to CPU silently.

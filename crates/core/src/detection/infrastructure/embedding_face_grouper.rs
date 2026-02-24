@@ -26,7 +26,17 @@ pub struct EmbeddingFaceGrouper {
 impl EmbeddingFaceGrouper {
     /// Load an ArcFace ONNX model for embedding computation.
     pub fn new(model_path: &Path, threshold: f64) -> Result<Self, Box<dyn std::error::Error>> {
-        let session = ort::session::Session::builder()?.commit_from_file(model_path)?;
+        let intra_threads = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
+        let session = ort::session::Session::builder()?
+            .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)?
+            .with_inter_threads(1)?
+            .with_intra_threads(intra_threads)?
+            .with_execution_providers([
+                ort::execution_providers::CoreMLExecutionProvider::default().build(),
+            ])?
+            .commit_from_file(model_path)?;
         Ok(Self {
             session: Mutex::new(session),
             threshold,
