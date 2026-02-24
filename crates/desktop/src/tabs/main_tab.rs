@@ -48,30 +48,21 @@ pub fn view<'a>(
 
         match processing {
             ProcessingState::Idle => {
-                let is_image = input_path
-                    .and_then(|p| p.extension())
-                    .and_then(|e| e.to_str())
-                    .map(|e| {
-                        ["jpg", "jpeg", "png", "bmp", "tiff", "tif", "webp"]
-                            .contains(&e.to_lowercase().as_str())
-                    })
-                    .unwrap_or(false);
+                // "Run" blurs all faces immediately
+                col = col.push(
+                    button(text("Run").size(scaled(13.0, fs)))
+                        .on_press(Message::RunBlur)
+                        .padding([8, 24]),
+                );
 
-                if is_image {
-                    // Images go straight to blur (no preview needed)
-                    col = col.push(
-                        button(text("Run").size(scaled(13.0, fs)))
-                            .on_press(Message::RunBlur)
-                            .padding([8, 24]),
-                    );
-                } else {
-                    // Videos get a preview step
-                    col = col.push(
-                        button(text("Choose which faces to blur...").size(scaled(13.0, fs)))
-                            .on_press(Message::RunPreview)
-                            .padding([8, 24]),
-                    );
-                }
+                // Preview option to select specific faces
+                col = col.push(Space::new().height(8));
+                col = col.push(
+                    button(text("Choose which faces to blur...").size(scaled(13.0, fs)))
+                        .on_press(Message::RunPreview)
+                        .padding([8, 24])
+                        .style(button::secondary),
+                );
             }
             ProcessingState::Preparing => {
                 col = col

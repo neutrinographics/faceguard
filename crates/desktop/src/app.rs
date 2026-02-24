@@ -219,10 +219,6 @@ impl App {
             Message::OutputSelected(None) => {}
             Message::RunPreview => {
                 if let Some(input) = self.input_path.clone() {
-                    // Don't preview images — go straight to blur
-                    if is_image(&input) {
-                        return self.update(Message::RunBlur);
-                    }
                     let params = PreviewParams {
                         input_path: input,
                         detector: self.settings.detector,
@@ -477,15 +473,6 @@ impl App {
 /// Scale a base font size by the user's font_scale setting.
 pub fn scaled(base: f32, font_scale: f32) -> f32 {
     (base * font_scale).round()
-}
-
-const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "bmp", "tiff", "tif", "webp"];
-
-fn is_image(path: &std::path::Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
-        .unwrap_or(false)
 }
 
 fn cleanup_temp_dir(_state: &FacesWellState) {

@@ -18,7 +18,10 @@ use video_blur_core::detection::infrastructure::skip_frame_detector::SkipFrameDe
 use video_blur_core::pipeline::preview_faces_use_case::PreviewFacesUseCase;
 use video_blur_core::shared::region::Region;
 use video_blur_core::video::infrastructure::ffmpeg_reader::FfmpegReader;
+use video_blur_core::video::infrastructure::image_file_reader::ImageFileReader;
 use video_blur_core::video::infrastructure::image_file_writer::ImageFileWriter;
+
+const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "bmp", "tiff", "tif", "webp"];
 
 const YOLO_MODEL_NAME: &str = "yolo11n-pose_widerface.onnx";
 const YOLO_MODEL_URL: &str =
@@ -145,9 +148,19 @@ fn run_preview(
             }
         };
 
-    // Open video reader
-    let mut reader: Box<dyn video_blur_core::video::domain::video_reader::VideoReader> =
-        Box::new(FfmpegReader::new());
+    // Open reader (image or video)
+    let is_image = input
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
+        .unwrap_or(false);
+
+    let mut reader: Box<dyn video_blur_core::video::domain::video_reader::VideoReader> = if is_image
+    {
+        Box::new(ImageFileReader::new())
+    } else {
+        Box::new(FfmpegReader::new())
+    };
     let metadata = reader.open(input)?;
 
     // Create temp directory for crop images
