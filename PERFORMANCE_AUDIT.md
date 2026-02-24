@@ -95,7 +95,7 @@ Ellipse SDF computes `(dx/semi_a)^2 + (dy/semi_b)^2` with two divisions per pixe
 
 ---
 
-### 11. Audio muxing creates temp file with 4x I/O
+### 11. ~~Audio muxing creates temp file with 4x I/O~~
 **File**: `crates/core/src/video/infrastructure/ffmpeg_writer.rs:216`
 
 After encoding video, the muxer re-opens both source and output to copy audio into a temp file, then renames. For a 1GB output, this is ~4GB of disk I/O.

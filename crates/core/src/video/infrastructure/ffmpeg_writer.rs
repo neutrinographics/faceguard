@@ -19,6 +19,9 @@ pub struct FfmpegWriter {
     fps: f64,
     frame_count: usize,
     video_stream_index: usize,
+    audio_source_stream_idx: Option<usize>,
+    audio_output_stream_idx: Option<usize>,
+    audio_source_time_base: Option<ffmpeg_next::Rational>,
 }
 
 // Safety: FfmpegWriter is only used from a single thread at a time.
@@ -38,6 +41,9 @@ impl FfmpegWriter {
             fps: 0.0,
             frame_count: 0,
             video_stream_index: 0,
+            audio_source_stream_idx: None,
+            audio_output_stream_idx: None,
+            audio_source_time_base: None,
         }
     }
 }
@@ -97,6 +103,31 @@ impl VideoWriter for FfmpegWriter {
         ost.set_parameters(&encoder);
 
         self.video_stream_index = 0; // first stream
+
+        // Add audio stream from source if available
+        if let Some(ref source_path) = metadata.source_path {
+            if let Ok(ictx_source) = ffmpeg_next::format::input(source_path) {
+                if let Some(audio_stream) =
+                    ictx_source.streams().best(ffmpeg_next::media::Type::Audio)
+                {
+                    let audio_idx = audio_stream.index();
+                    let audio_tb = audio_stream.time_base();
+                    let audio_params = audio_stream.parameters();
+
+                    let mut audio_ost = octx
+                        .add_stream(ffmpeg_next::encoder::find(ffmpeg_next::codec::Id::None))?;
+                    audio_ost.set_parameters(audio_params);
+                    unsafe {
+                        (*audio_ost.parameters().as_mut_ptr()).codec_tag = 0;
+                    }
+                    let audio_ost_idx = audio_ost.index();
+
+                    self.audio_source_stream_idx = Some(audio_idx);
+                    self.audio_output_stream_idx = Some(audio_ost_idx);
+                    self.audio_source_time_base = Some(audio_tb);
+                }
+            }
+        }
 
         octx.write_header()?;
 
@@ -189,129 +220,49 @@ impl VideoWriter for FfmpegWriter {
                 encoded.write_interleaved(octx)?;
             }
 
-            octx.write_trailer()?;
-        }
-
-        // Audio muxing: if source has audio, remux it into the output
-        if let (Some(source_path), Some(output_path)) =
-            (self.source_path.take(), self.output_path.take())
-        {
-            if let Err(e) = mux_audio(&source_path, &output_path) {
-                log::warn!("Audio muxing failed: {e}");
+            // Copy audio packets from source before writing trailer
+            if let (Some(audio_src_idx), Some(audio_ost_idx), Some(audio_src_tb), Some(ref source_path)) = (
+                self.audio_source_stream_idx,
+                self.audio_output_stream_idx,
+                self.audio_source_time_base,
+                &self.source_path,
+            ) {
+                match ffmpeg_next::format::input(source_path) {
+                    Ok(mut ictx) => {
+                        let ost_audio_tb = octx.stream(audio_ost_idx).unwrap().time_base();
+                        for (stream, mut packet) in ictx.packets() {
+                            if stream.index() != audio_src_idx {
+                                continue;
+                            }
+                            packet.rescale_ts(audio_src_tb, ost_audio_tb);
+                            packet.set_position(-1);
+                            packet.set_stream(audio_ost_idx);
+                            if let Err(e) = packet.write_interleaved(octx) {
+                                log::warn!("Failed to write audio packet: {e}");
+                                break;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("Audio muxing failed: could not reopen source: {e}");
+                    }
+                }
             }
+
+            octx.write_trailer()?;
         }
 
         self.octx = None;
         self.encoder = None;
         self.scaler = None;
+        self.source_path = None;
+        self.output_path = None;
+        self.audio_source_stream_idx = None;
+        self.audio_output_stream_idx = None;
+        self.audio_source_time_base = None;
 
         Ok(())
     }
-}
-
-/// Copies audio from `source` into `video_output` by remuxing.
-///
-/// Creates a temp file with both video + audio, then replaces the original
-/// output. Fails silently if no audio stream exists.
-fn mux_audio(source: &Path, video_output: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let ictx_source = ffmpeg_next::format::input(source)?;
-
-    // Check if source has audio
-    let has_audio = ictx_source
-        .streams()
-        .best(ffmpeg_next::media::Type::Audio)
-        .is_some();
-
-    if !has_audio {
-        return Ok(());
-    }
-
-    drop(ictx_source);
-
-    // Re-open source and video-only output for remuxing
-    let mut ictx_source = ffmpeg_next::format::input(source)?;
-    let mut ictx_video = ffmpeg_next::format::input(video_output)?;
-
-    let ext = video_output
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("mp4");
-    let temp_path = video_output.with_extension(format!("_mux.{ext}"));
-
-    let mut octx = ffmpeg_next::format::output(&temp_path)?;
-
-    // Map video streams from video file
-    let mut video_stream_map: Vec<isize> = vec![-1; ictx_video.nb_streams() as usize];
-    let mut audio_stream_map: Vec<isize> = vec![-1; ictx_source.nb_streams() as usize];
-    let mut ost_index: usize = 0;
-
-    for (idx, stream) in ictx_video.streams().enumerate() {
-        if stream.parameters().medium() == ffmpeg_next::media::Type::Video {
-            let mut ost =
-                octx.add_stream(ffmpeg_next::encoder::find(ffmpeg_next::codec::Id::None))?;
-            ost.set_parameters(stream.parameters());
-            unsafe {
-                (*ost.parameters().as_mut_ptr()).codec_tag = 0;
-            }
-            video_stream_map[idx] = ost_index as isize;
-            ost_index += 1;
-        }
-    }
-
-    // Map audio streams from source
-    for (idx, stream) in ictx_source.streams().enumerate() {
-        if stream.parameters().medium() == ffmpeg_next::media::Type::Audio {
-            let mut ost =
-                octx.add_stream(ffmpeg_next::encoder::find(ffmpeg_next::codec::Id::None))?;
-            ost.set_parameters(stream.parameters());
-            unsafe {
-                (*ost.parameters().as_mut_ptr()).codec_tag = 0;
-            }
-            audio_stream_map[idx] = ost_index as isize;
-            ost_index += 1;
-        }
-    }
-
-    octx.write_header()?;
-
-    // Copy video packets
-    let video_time_bases: Vec<_> = ictx_video.streams().map(|s| s.time_base()).collect();
-
-    for (stream, mut packet) in ictx_video.packets() {
-        let ist_idx = stream.index();
-        let ost_idx = video_stream_map[ist_idx];
-        if ost_idx < 0 {
-            continue;
-        }
-        let ost_time_base = octx.stream(ost_idx as usize).unwrap().time_base();
-        packet.rescale_ts(video_time_bases[ist_idx], ost_time_base);
-        packet.set_position(-1);
-        packet.set_stream(ost_idx as usize);
-        packet.write_interleaved(&mut octx)?;
-    }
-
-    // Copy audio packets
-    let audio_time_bases: Vec<_> = ictx_source.streams().map(|s| s.time_base()).collect();
-
-    for (stream, mut packet) in ictx_source.packets() {
-        let ist_idx = stream.index();
-        let ost_idx = audio_stream_map[ist_idx];
-        if ost_idx < 0 {
-            continue;
-        }
-        let ost_time_base = octx.stream(ost_idx as usize).unwrap().time_base();
-        packet.rescale_ts(audio_time_bases[ist_idx], ost_time_base);
-        packet.set_position(-1);
-        packet.set_stream(ost_idx as usize);
-        packet.write_interleaved(&mut octx)?;
-    }
-
-    octx.write_trailer()?;
-
-    // Replace original output with muxed version
-    std::fs::rename(&temp_path, video_output)?;
-
-    Ok(())
 }
 
 #[cfg(test)]
