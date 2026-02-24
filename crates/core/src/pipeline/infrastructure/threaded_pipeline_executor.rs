@@ -260,8 +260,8 @@ fn flush_oldest(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (mut frame, own_regions) = buffer.pop_front().unwrap();
 
-    let lookahead_regions: Vec<Vec<Region>> =
-        buffer.iter().map(|(_, regions)| regions.clone()).collect();
+    let lookahead_regions: Vec<&[Region]> =
+        buffer.iter().map(|(_, regions)| regions.as_slice()).collect();
 
     let merged = merger.merge(&own_regions, &lookahead_regions, frame_w, frame_h);
     blurrer.blur(&mut frame, &merged)?;

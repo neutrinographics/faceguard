@@ -20,7 +20,7 @@ impl RegionMerger {
     pub fn merge(
         &self,
         current: &[Region],
-        lookahead: &[Vec<Region>],
+        lookahead: &[&[Region]],
         frame_w: u32,
         frame_h: u32,
     ) -> Vec<Region> {
@@ -30,7 +30,7 @@ impl RegionMerger {
         let total = lookahead.len();
 
         for (idx, future) in lookahead.iter().enumerate() {
-            for r in future {
+            for r in *future {
                 match r.track_id {
                     Some(tid) => {
                         if !seen_ids.contains(&tid) {
@@ -160,7 +160,8 @@ mod tests {
     fn test_track_id_dedup_current_wins() {
         let merger = RegionMerger::new();
         let current = vec![region(100, 100, 50, 50, Some(1))];
-        let lookahead = vec![vec![region(200, 200, 50, 50, Some(1))]]; // same track_id
+        let la0 = vec![region(200, 200, 50, 50, Some(1))]; // same track_id
+        let lookahead: Vec<&[Region]> = vec![&la0];
         let result = merger.merge(&current, &lookahead, FW, FH);
 
         // Should keep only the current region (track_id=1 already seen)
@@ -173,7 +174,8 @@ mod tests {
     fn test_new_track_from_lookahead_added() {
         let merger = RegionMerger::new();
         let current = vec![region(100, 100, 50, 50, Some(1))];
-        let lookahead = vec![vec![region(500, 500, 50, 50, Some(2))]]; // new track
+        let la0 = vec![region(500, 500, 50, 50, Some(2))]; // new track
+        let lookahead: Vec<&[Region]> = vec![&la0];
         let result = merger.merge(&current, &lookahead, FW, FH);
 
         assert!(result.iter().any(|r| r.track_id == Some(1)));
@@ -184,9 +186,8 @@ mod tests {
     fn test_untracked_always_appended() {
         let merger = RegionMerger::new();
         let current = vec![region(100, 100, 50, 50, Some(1))];
-        let lookahead = vec![vec![
-            region(500, 500, 50, 50, None), // untracked
-        ]];
+        let la0 = vec![region(500, 500, 50, 50, None)]; // untracked
+        let lookahead: Vec<&[Region]> = vec![&la0];
         let result = merger.merge(&current, &lookahead, FW, FH);
 
         // Both should be present (untracked always added)
@@ -199,9 +200,8 @@ mod tests {
     fn test_iou_dedup_removes_overlapping_untracked() {
         let merger = RegionMerger::new();
         let current = vec![region(100, 100, 100, 100, None)];
-        let lookahead = vec![vec![
-            region(110, 110, 100, 100, None), // high IoU with current
-        ]];
+        let la0 = vec![region(110, 110, 100, 100, None)]; // high IoU with current
+        let lookahead: Vec<&[Region]> = vec![&la0];
         let result = merger.merge(&current, &lookahead, FW, FH);
 
         // After IoU dedup, the overlapping untracked should be removed

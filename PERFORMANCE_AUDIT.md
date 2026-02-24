@@ -131,7 +131,7 @@ Horizontal blur, buffer copy, and vertical blur each get their own submit. 3 sub
 
 ---
 
-### 15. Lookahead regions cloned every frame
+### 15. ~~Lookahead regions cloned every frame~~
 **File**: `crates/core/src/pipeline/blur_faces_use_case.rs:248`
 
 All lookahead region vectors are cloned on every frame flush.
