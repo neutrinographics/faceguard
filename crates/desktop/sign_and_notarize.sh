@@ -75,7 +75,6 @@ DMG_STAGING="$BUNDLE_DIR/dmg_staging"
 rm -rf "$DMG_STAGING"
 mkdir -p "$DMG_STAGING"
 cp -R "$APP_PATH" "$DMG_STAGING/"
-ln -s /Applications "$DMG_STAGING/Applications"
 
 # Create a read-write DMG first so we can configure the Finder view
 DMG_RW="$BUNDLE_DIR/${APP_NAME}_rw.dmg"
@@ -87,6 +86,13 @@ rm -rf "$DMG_STAGING"
 # Mount the read-write DMG and configure Finder layout
 MOUNT_DIR="/Volumes/$APP_NAME"
 hdiutil attach "$DMG_RW" -mountpoint "$MOUNT_DIR" -noverify
+
+# Create a Finder alias to /Applications (aliases show the target's icon)
+osascript <<'ALIAS_SCRIPT'
+tell application "Finder"
+    make new alias file at POSIX file "/Volumes/Video Blur" to POSIX file "/Applications" with properties {name:"Applications"}
+end tell
+ALIAS_SCRIPT
 
 osascript <<APPLESCRIPT
 tell application "Finder"
