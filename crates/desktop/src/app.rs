@@ -106,7 +106,7 @@ pub struct App {
     pub processing: ProcessingState,
     pub faces_well: FacesWellState,
     /// Cached detection results from preview pass (for reuse in blur).
-    detection_cache: Option<HashMap<usize, Vec<Region>>>,
+    detection_cache: Option<Arc<HashMap<usize, Vec<Region>>>>,
     /// Pre-loaded model paths shared across workers.
     model_cache: Arc<ModelCache>,
     preview_rx: Option<Receiver<PreviewMessage>>,
@@ -275,7 +275,7 @@ impl App {
                         PreviewMessage::Complete(result) => {
                             self.faces_well
                                 .populate(result.crops, result.groups, result.temp_dir);
-                            self.detection_cache = Some(result.detection_cache);
+                            self.detection_cache = Some(Arc::new(result.detection_cache));
                             self.processing = ProcessingState::Previewed;
                             self.preview_rx = None;
                             self.worker_cancel = None;

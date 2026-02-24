@@ -45,7 +45,7 @@ pub struct BlurParams {
     pub blur_strength: u32,
     pub lookahead: u32,
     /// Cached detection results from preview pass (skip re-detecting).
-    pub detection_cache: Option<HashMap<usize, Vec<Region>>>,
+    pub detection_cache: Option<Arc<HashMap<usize, Vec<Region>>>>,
     /// If set, only blur these face IDs. None = blur all.
     pub blur_ids: Option<HashSet<u32>>,
     /// Shared model cache for pre-loaded model paths.
@@ -90,8 +90,8 @@ fn run_blur(
 
     // Build detector: use cached if available, otherwise fresh
     let detector: Box<dyn video_blur_core::detection::domain::face_detector::FaceDetector> =
-        if let Some(cache) = params.detection_cache.clone() {
-            Box::new(CachedFaceDetector::new(cache))
+        if let Some(ref cache) = params.detection_cache {
+            Box::new(CachedFaceDetector::new(Arc::clone(cache)))
         } else {
             // Wait for model (pre-loaded at startup or download in progress)
             let tx_dl = tx.clone();

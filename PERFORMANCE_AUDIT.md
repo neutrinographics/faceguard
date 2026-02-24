@@ -140,7 +140,7 @@ All lookahead region vectors are cloned on every frame flush.
 
 ---
 
-### 16. Detection cache cloned in blur_worker
+### 16. ~~Detection cache cloned in blur_worker~~
 **File**: `crates/desktop/src/workers/blur_worker.rs:92`
 
 Full `HashMap<usize, Vec<Region>>` cloned when passed to `CachedFaceDetector`. Scales with video length.

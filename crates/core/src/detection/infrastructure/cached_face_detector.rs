@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::detection::domain::face_detector::FaceDetector;
 use crate::shared::frame::Frame;
@@ -10,11 +11,11 @@ use crate::shared::region::Region;
 /// can reuse those exact regions, guaranteeing that track IDs match what
 /// the user selected in the preview UI.
 pub struct CachedFaceDetector {
-    cache: HashMap<usize, Vec<Region>>,
+    cache: Arc<HashMap<usize, Vec<Region>>>,
 }
 
 impl CachedFaceDetector {
-    pub fn new(cache: HashMap<usize, Vec<Region>>) -> Self {
+    pub fn new(cache: Arc<HashMap<usize, Vec<Region>>>) -> Self {
         Self { cache }
     }
 }
@@ -50,7 +51,7 @@ mod tests {
     #[test]
     fn test_returns_cached_regions_for_known_frame() {
         let regions = vec![region(1, 10), region(2, 60)];
-        let cache = HashMap::from([(0, regions.clone())]);
+        let cache = Arc::new(HashMap::from([(0, regions.clone())]));
         let mut detector = CachedFaceDetector::new(cache);
 
         let result = detector.detect(&frame(0)).unwrap();
@@ -60,7 +61,7 @@ mod tests {
 
     #[test]
     fn test_returns_empty_for_unknown_frame() {
-        let cache = HashMap::from([(0, vec![region(1, 10)])]);
+        let cache = Arc::new(HashMap::from([(0, vec![region(1, 10)])]));
         let mut detector = CachedFaceDetector::new(cache);
 
         let result = detector.detect(&frame(5)).unwrap();
@@ -70,11 +71,11 @@ mod tests {
 
     #[test]
     fn test_returns_different_regions_per_frame() {
-        let cache = HashMap::from([
+        let cache = Arc::new(HashMap::from([
             (0, vec![region(1, 10)]),
             (1, vec![region(1, 20), region(2, 60)]),
             (2, vec![]),
-        ]);
+        ]));
         let mut detector = CachedFaceDetector::new(cache);
 
         assert_eq!(detector.detect(&frame(0)).unwrap().len(), 1);
@@ -84,7 +85,7 @@ mod tests {
 
     #[test]
     fn test_empty_cache_always_returns_empty() {
-        let mut detector = CachedFaceDetector::new(HashMap::new());
+        let mut detector = CachedFaceDetector::new(Arc::new(HashMap::new()));
 
         assert!(detector.detect(&frame(0)).unwrap().is_empty());
         assert!(detector.detect(&frame(99)).unwrap().is_empty());
@@ -92,7 +93,7 @@ mod tests {
 
     #[test]
     fn test_track_ids_are_preserved() {
-        let cache = HashMap::from([(0, vec![region(42, 10), region(7, 60)])]);
+        let cache = Arc::new(HashMap::from([(0, vec![region(42, 10), region(7, 60)])]));
         let mut detector = CachedFaceDetector::new(cache);
 
         let result = detector.detect(&frame(0)).unwrap();
