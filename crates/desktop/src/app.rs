@@ -181,7 +181,6 @@ impl App {
                 // Clear previous preview data
                 self.faces_well.clear();
                 self.detection_cache = None;
-                cleanup_temp_dir(&self.faces_well);
             }
             Message::InputSelected(None) => {}
             Message::SelectOutput => {
@@ -276,7 +275,8 @@ impl App {
                             self.processing = ProcessingState::Scanning(current, total);
                         }
                         PreviewMessage::Complete(result) => {
-                            self.faces_well.populate(result.crops, result.groups);
+                            self.faces_well
+                                .populate(result.crops, result.groups, result.temp_dir);
                             self.detection_cache = Some(result.detection_cache);
                             self.processing = ProcessingState::Previewed;
                             self.preview_rx = None;
@@ -371,12 +371,17 @@ impl App {
             }
             Message::RestoreDefaults => {
                 let defaults = Settings::default();
+                let detection_changed = self.settings.detector != defaults.detector
+                    || self.settings.confidence != defaults.confidence;
                 self.settings.detector = defaults.detector;
                 self.settings.blur_shape = defaults.blur_shape;
                 self.settings.confidence = defaults.confidence;
                 self.settings.blur_strength = defaults.blur_strength;
                 self.settings.lookahead = defaults.lookahead;
                 self.settings.save();
+                if detection_changed {
+                    self.invalidate_detection();
+                }
             }
             Message::AppearanceChanged(appearance) => {
                 self.settings.appearance = appearance;
@@ -492,10 +497,4 @@ impl App {
 /// Scale a base font size by the user's font_scale setting.
 pub fn scaled(base: f32, font_scale: f32) -> f32 {
     (base * font_scale).round()
-}
-
-fn cleanup_temp_dir(_state: &FacesWellState) {
-    // Temp dir cleanup happens when the OS reclaims the temp directory.
-    // We intentionally leaked the TempDir in preview_worker to keep files alive.
-    // A more robust approach would store the temp path and clean it up here.
 }

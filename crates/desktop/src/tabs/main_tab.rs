@@ -185,9 +185,16 @@ pub fn view<'a>(
                     )
                     .push(Space::new().height(8))
                     .push(
-                        button(text("Retry").size(scaled(13.0, fs)))
-                            .on_press(Message::RunBlur)
-                            .padding([8, 24]),
+                        row![
+                            button(text("Retry").size(scaled(13.0, fs)))
+                                .on_press(Message::RunBlur)
+                                .padding([8, 24]),
+                            button(text("Dismiss").size(scaled(13.0, fs)))
+                                .on_press(Message::DismissComplete)
+                                .padding([8, 24])
+                                .style(button::secondary),
+                        ]
+                        .spacing(8),
                     );
             }
         }

@@ -23,6 +23,8 @@ pub struct FacesWellState {
     pub group_faces: bool,
     /// Currently selected face IDs
     pub selected: HashSet<u32>,
+    /// Path to the temp directory holding crop images (leaked from preview worker).
+    pub temp_dir: Option<PathBuf>,
 }
 
 impl FacesWellState {
@@ -32,21 +34,38 @@ impl FacesWellState {
             groups: vec![],
             group_faces: true,
             selected: HashSet::new(),
+            temp_dir: None,
         }
     }
 
     /// Populate with preview results. Selects all faces by default.
-    pub fn populate(&mut self, crops: HashMap<u32, PathBuf>, groups: Vec<Vec<u32>>) {
+    pub fn populate(
+        &mut self,
+        crops: HashMap<u32, PathBuf>,
+        groups: Vec<Vec<u32>>,
+        temp_dir: PathBuf,
+    ) {
+        self.cleanup_temp_dir();
         self.selected = crops.keys().copied().collect();
         self.crops = crops;
         self.groups = groups;
+        self.temp_dir = Some(temp_dir);
     }
 
-    /// Clear all state.
+    /// Clear all state and clean up temp directory.
     pub fn clear(&mut self) {
+        self.cleanup_temp_dir();
         self.crops.clear();
         self.groups.clear();
         self.selected.clear();
+    }
+
+    /// Remove the leaked temp directory if it exists.
+    fn cleanup_temp_dir(&mut self) {
+        if let Some(ref dir) = self.temp_dir {
+            let _ = std::fs::remove_dir_all(dir);
+            self.temp_dir = None;
+        }
     }
 
     /// Toggle selection of a single face.
