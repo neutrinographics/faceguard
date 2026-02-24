@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use crate::blurring::domain::frame_blurrer::FrameBlurrer;
 use crate::shared::frame::Frame;
 use crate::shared::region::Region;
@@ -16,6 +18,7 @@ pub struct CpuRectangularBlurrer {
     kernel_size: usize,
     scale: usize,
     small_k: usize,
+    roi_buf: RefCell<Vec<u8>>,
 }
 
 impl CpuRectangularBlurrer {
@@ -26,6 +29,7 @@ impl CpuRectangularBlurrer {
             kernel_size,
             scale,
             small_k,
+            roi_buf: RefCell::new(Vec::new()),
         }
     }
 }
@@ -56,8 +60,10 @@ impl FrameBlurrer for CpuRectangularBlurrer {
                 continue;
             }
 
-            // Extract ROI
-            let mut roi = vec![0u8; rw * rh * channels];
+            // Extract ROI (reuse buffer across regions)
+            let mut roi = self.roi_buf.borrow_mut();
+            let roi_size = rw * rh * channels;
+            roi.resize(roi_size, 0);
             for row in 0..rh {
                 let src_offset = ((ry + row) * fw + rx) * channels;
                 let dst_offset = row * rw * channels;
@@ -71,7 +77,8 @@ impl FrameBlurrer for CpuRectangularBlurrer {
             } else {
                 let (mut small, sw, sh) = gaussian::downscale(&roi, rw, rh, channels, self.scale);
                 gaussian::separable_gaussian_blur(&mut small, sw, sh, channels, self.small_k);
-                roi = gaussian::upscale(&small, sw, sh, channels, rw, rh);
+                let upscaled = gaussian::upscale(&small, sw, sh, channels, rw, rh);
+                roi[..roi_size].copy_from_slice(&upscaled);
             }
 
             // Write blurred ROI back

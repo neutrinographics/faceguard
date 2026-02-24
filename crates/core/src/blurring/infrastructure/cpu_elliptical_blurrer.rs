@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use crate::blurring::domain::frame_blurrer::FrameBlurrer;
 use crate::shared::frame::Frame;
 use crate::shared::region::Region;
@@ -16,6 +18,7 @@ pub struct CpuEllipticalBlurrer {
     kernel_size: usize,
     scale: usize,
     small_k: usize,
+    roi_buf: RefCell<Vec<u8>>,
 }
 
 impl CpuEllipticalBlurrer {
@@ -26,6 +29,7 @@ impl CpuEllipticalBlurrer {
             kernel_size,
             scale,
             small_k,
+            roi_buf: RefCell::new(Vec::new()),
         }
     }
 }
@@ -56,8 +60,10 @@ impl FrameBlurrer for CpuEllipticalBlurrer {
                 continue;
             }
 
-            // Extract ROI
-            let mut roi = vec![0u8; rw * rh * channels];
+            // Extract ROI (reuse buffer across regions)
+            let mut roi = self.roi_buf.borrow_mut();
+            let roi_size = rw * rh * channels;
+            roi.resize(roi_size, 0);
             for row in 0..rh {
                 let src_offset = ((ry + row) * fw + rx) * channels;
                 let dst_offset = row * rw * channels;
@@ -66,14 +72,14 @@ impl FrameBlurrer for CpuEllipticalBlurrer {
             }
 
             // Blur ROI (with downscale optimization for large kernels)
-            let blurred_roi = if self.scale <= 1 || rh < self.scale * 2 || rw < self.scale * 2 {
+            if self.scale <= 1 || rh < self.scale * 2 || rw < self.scale * 2 {
                 gaussian::separable_gaussian_blur(&mut roi, rw, rh, channels, self.kernel_size);
-                roi
             } else {
                 let (mut small, sw, sh) = gaussian::downscale(&roi, rw, rh, channels, self.scale);
                 gaussian::separable_gaussian_blur(&mut small, sw, sh, channels, self.small_k);
-                gaussian::upscale(&small, sw, sh, channels, rw, rh)
-            };
+                let upscaled = gaussian::upscale(&small, sw, sh, channels, rw, rh);
+                roi[..roi_size].copy_from_slice(&upscaled);
+            }
 
             // Get ellipse geometry from region
             let (ecx, ecy) = r.ellipse_center_in_roi();
@@ -98,7 +104,7 @@ impl FrameBlurrer for CpuEllipticalBlurrer {
                         let frame_offset = ((ry + row) * fw + (rx + col)) * channels;
                         let roi_offset = (row * rw + col) * channels;
                         data[frame_offset..frame_offset + channels]
-                            .copy_from_slice(&blurred_roi[roi_offset..roi_offset + channels]);
+                            .copy_from_slice(&roi[roi_offset..roi_offset + channels]);
                     }
                 }
             }

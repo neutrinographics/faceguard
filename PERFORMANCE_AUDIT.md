@@ -76,7 +76,7 @@ Ellipse SDF computes `(dx/semi_a)^2 + (dy/semi_b)^2` with two divisions per pixe
 
 ---
 
-### 9. ROI buffer allocated per region
+### 9. ~~ROI buffer allocated per region~~
 **File**: `crates/core/src/blurring/infrastructure/cpu_elliptical_blurrer.rs:60`
 **File**: `crates/core/src/blurring/infrastructure/cpu_rectangular_blurrer.rs:60`
 
