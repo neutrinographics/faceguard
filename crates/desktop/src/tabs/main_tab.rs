@@ -25,6 +25,7 @@ pub fn view<'a>(
     change_output_hovered: bool,
     choose_faces_hovered: bool,
     cancel_hovered: bool,
+    rescan_hovered: bool,
 ) -> Element<'a, Message> {
     let muted = muted_color(theme);
     let tertiary = tertiary_color(theme);
@@ -41,7 +42,7 @@ pub fn view<'a>(
         return error_state(fs, muted, tertiary, e);
     }
 
-    workflow_view(fs, input_path, output_path, processing, faces_well, theme, blur_button_hovered, change_input_hovered, change_output_hovered, choose_faces_hovered, cancel_hovered)
+    workflow_view(fs, input_path, output_path, processing, faces_well, theme, blur_button_hovered, change_input_hovered, change_output_hovered, choose_faces_hovered, cancel_hovered, rescan_hovered)
 }
 
 fn complete_state<'a>(
@@ -123,6 +124,7 @@ fn workflow_view<'a>(
     change_output_hovered: bool,
     choose_faces_hovered: bool,
     cancel_hovered: bool,
+    rescan_hovered: bool,
 ) -> Element<'a, Message> {
     let muted = muted_color(theme);
     let tertiary = tertiary_color(theme);
@@ -257,10 +259,13 @@ fn workflow_view<'a>(
                 .push(
                     row![
                         blur_btn,
-                        button(text("Re-scan").size(scaled(14.0, fs)))
-                            .on_press(Message::RunPreview)
-                            .padding([14, 20])
-                            .style(button::secondary),
+                        secondary_button::secondary_button(
+                            move || text("Re-scan").size(scaled(14.0, fs)).into(),
+                            Message::RunPreview,
+                            rescan_hovered,
+                            Message::RescanHover,
+                            [14, 20],
+                        ),
                     ]
                     .spacing(10),
                 );

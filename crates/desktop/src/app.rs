@@ -95,6 +95,7 @@ pub enum Message {
     ChangeOutputHover(bool),
     ChooseFacesHover(bool),
     CancelHover(bool),
+    RescanHover(bool),
 }
 
 pub struct App {
@@ -118,6 +119,7 @@ pub struct App {
     pub change_output_hovered: bool,
     pub choose_faces_hovered: bool,
     pub cancel_hovered: bool,
+    pub rescan_hovered: bool,
 }
 
 impl App {
@@ -144,6 +146,7 @@ impl App {
                 change_output_hovered: false,
                 choose_faces_hovered: false,
                 cancel_hovered: false,
+                rescan_hovered: false,
             },
             Task::none(),
         )
@@ -260,6 +263,9 @@ impl App {
             Message::CancelHover(hovered) => {
                 self.cancel_hovered = hovered;
             }
+            Message::RescanHover(hovered) => {
+                self.rescan_hovered = hovered;
+            }
         }
         Task::none()
     }
@@ -317,6 +323,7 @@ impl App {
                 self.change_output_hovered,
                 self.choose_faces_hovered,
                 self.cancel_hovered,
+                self.rescan_hovered,
             ),
             Tab::Settings => tabs::settings_tab::view(&self.settings, self.gpu_context.is_some()),
             Tab::About => tabs::about_tab::view(fs, &current_theme),
