@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -96,6 +96,7 @@ pub enum Message {
     ChooseFacesHover(bool),
     CancelHover(bool),
     RescanHover(bool),
+    FaceCardHover(u32, bool),
 }
 
 pub struct App {
@@ -120,6 +121,7 @@ pub struct App {
     pub choose_faces_hovered: bool,
     pub cancel_hovered: bool,
     pub rescan_hovered: bool,
+    pub face_card_hovered: HashSet<u32>,
 }
 
 impl App {
@@ -147,6 +149,7 @@ impl App {
                 choose_faces_hovered: false,
                 cancel_hovered: false,
                 rescan_hovered: false,
+                face_card_hovered: HashSet::new(),
             },
             Task::none(),
         )
@@ -266,6 +269,13 @@ impl App {
             Message::RescanHover(hovered) => {
                 self.rescan_hovered = hovered;
             }
+            Message::FaceCardHover(id, hovered) => {
+                if hovered {
+                    self.face_card_hovered.insert(id);
+                } else {
+                    self.face_card_hovered.remove(&id);
+                }
+            }
         }
         Task::none()
     }
@@ -324,6 +334,7 @@ impl App {
                 self.choose_faces_hovered,
                 self.cancel_hovered,
                 self.rescan_hovered,
+                &self.face_card_hovered,
             ),
             Tab::Settings => tabs::settings_tab::view(&self.settings, self.gpu_context.is_some()),
             Tab::About => tabs::about_tab::view(fs, &current_theme),

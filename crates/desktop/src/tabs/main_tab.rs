@@ -26,6 +26,7 @@ pub fn view<'a>(
     choose_faces_hovered: bool,
     cancel_hovered: bool,
     rescan_hovered: bool,
+    face_card_hovered: &std::collections::HashSet<u32>,
 ) -> Element<'a, Message> {
     let muted = muted_color(theme);
     let tertiary = tertiary_color(theme);
@@ -42,7 +43,7 @@ pub fn view<'a>(
         return error_state(fs, muted, tertiary, e);
     }
 
-    workflow_view(fs, input_path, output_path, processing, faces_well, theme, blur_button_hovered, change_input_hovered, change_output_hovered, choose_faces_hovered, cancel_hovered, rescan_hovered)
+    workflow_view(fs, input_path, output_path, processing, faces_well, theme, blur_button_hovered, change_input_hovered, change_output_hovered, choose_faces_hovered, cancel_hovered, rescan_hovered, face_card_hovered)
 }
 
 fn complete_state<'a>(
@@ -125,6 +126,7 @@ fn workflow_view<'a>(
     choose_faces_hovered: bool,
     cancel_hovered: bool,
     rescan_hovered: bool,
+    face_card_hovered: &std::collections::HashSet<u32>,
 ) -> Element<'a, Message> {
     let muted = muted_color(theme);
     let tertiary = tertiary_color(theme);
@@ -254,7 +256,7 @@ fn workflow_view<'a>(
                 [14, 24],
             );
             col = col
-                .push(faces_well::view(faces_well, fs, theme))
+                .push(faces_well::view(faces_well, fs, theme, face_card_hovered))
                 .push(Space::new().height(16))
                 .push(
                     row![
