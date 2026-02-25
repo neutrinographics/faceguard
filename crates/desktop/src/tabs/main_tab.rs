@@ -7,6 +7,7 @@ use crate::app::{scaled, Message, ProcessingState};
 use crate::widgets::drop_zone;
 use crate::widgets::file_row;
 use crate::widgets::primary_button;
+use crate::widgets::secondary_button;
 use crate::theme::{muted_color, tertiary_color};
 use crate::widgets::faces_well::{self, FacesWellState};
 
@@ -22,6 +23,7 @@ pub fn view<'a>(
     blur_button_hovered: bool,
     change_input_hovered: bool,
     change_output_hovered: bool,
+    choose_faces_hovered: bool,
 ) -> Element<'a, Message> {
     let muted = muted_color(theme);
     let tertiary = tertiary_color(theme);
@@ -38,7 +40,7 @@ pub fn view<'a>(
         return error_state(fs, muted, tertiary, e);
     }
 
-    workflow_view(fs, input_path, output_path, processing, faces_well, theme, blur_button_hovered, change_input_hovered, change_output_hovered)
+    workflow_view(fs, input_path, output_path, processing, faces_well, theme, blur_button_hovered, change_input_hovered, change_output_hovered, choose_faces_hovered)
 }
 
 fn complete_state<'a>(
@@ -118,6 +120,7 @@ fn workflow_view<'a>(
     blur_button_hovered: bool,
     change_input_hovered: bool,
     change_output_hovered: bool,
+    choose_faces_hovered: bool,
 ) -> Element<'a, Message> {
     let muted = muted_color(theme);
     let tertiary = tertiary_color(theme);
@@ -178,13 +181,23 @@ fn workflow_view<'a>(
             col = col
                 .push(blur_btn)
                 .push(Space::new().height(10))
-                .push(
-                    button(text("Choose Specific Faces\u{2026}").size(scaled(14.0, fs)))
-                        .on_press(Message::RunPreview)
-                        .padding([14, 20])
-                        .width(Length::Fill)
-                        .style(button::secondary),
-                );
+                .push(secondary_button::secondary_button_fill(
+                    move || {
+                        text("Choose Specific Faces\u{2026}")
+                            .size(scaled(14.0, fs))
+                            .font(iced::Font {
+                                weight: iced::font::Weight::Bold,
+                                ..iced::Font::DEFAULT
+                            })
+                            .align_x(iced::Alignment::Center)
+                            .width(Length::Fill)
+                            .into()
+                    },
+                    Message::RunPreview,
+                    choose_faces_hovered,
+                    Message::ChooseFacesHover,
+                    [14, 20],
+                ));
         }
         ProcessingState::Preparing => {
             col = col.push(progress_with_cancel(
