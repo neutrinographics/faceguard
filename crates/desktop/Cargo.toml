@@ -16,6 +16,7 @@ static-ffmpeg = ["video-blur-core/static-ffmpeg"]
 [dependencies]
 video-blur-core = { workspace = true }
 iced = { workspace = true }
+iced_anim = { workspace = true }
 rfd = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
