@@ -217,14 +217,35 @@ impl App {
         let current_theme = self.theme();
         let palette = current_theme.palette();
 
-        let tab_bar = container(
+        let surface = theme::surface_color(&current_theme);
+        let border_light = iced::Color {
+            a: 0.12,
+            ..palette.text
+        };
+
+        let tab_row = container(
             row(Tab::ALL
                 .iter()
                 .map(|&tab| tab_button(tab, tab == self.active_tab, palette, fs))
                 .collect::<Vec<_>>())
-            .spacing(0),
+            .spacing(4),
         )
-        .padding([0, 20]);
+        .width(Length::Fill)
+        .padding([0, 20])
+        .style(move |_theme: &Theme| container::Style {
+            background: Some(surface.into()),
+            ..container::Style::default()
+        });
+
+        let tab_divider = container(Space::new().height(0))
+            .width(Length::Fill)
+            .height(1)
+            .style(move |_theme: &Theme| container::Style {
+                background: Some(border_light.into()),
+                ..container::Style::default()
+            });
+
+        let tab_bar = column![tab_row, tab_divider].spacing(0);
 
         let content: Element<'_, Message> = match self.active_tab {
             Tab::Blur => tabs::main_tab::view(
@@ -494,31 +515,67 @@ fn tab_button<'a>(
         a: 0.45,
         ..palette.text
     };
-    let label_color = if is_active {
-        palette.primary
-    } else {
-        inactive_color
+    let hover_color = iced::Color {
+        a: 0.65,
+        ..palette.text
     };
-    let label = text(tab.label()).size(scaled(14.0, fs)).color(label_color);
+    let active_color = palette.primary;
+
+    let label = text(tab.label())
+        .size(scaled(14.0, fs))
+        .font(iced::Font {
+            weight: iced::font::Weight::Semibold,
+            ..iced::Font::DEFAULT
+        });
     let btn = button(label)
         .on_press(Message::TabSelected(tab))
         .padding([12, 20])
-        .style(button::text);
+        .width(Length::Shrink)
+        .style(move |_theme: &Theme, status: button::Status| {
+            let text_color = if is_active {
+                active_color
+            } else {
+                match status {
+                    button::Status::Hovered | button::Status::Pressed => hover_color,
+                    _ => inactive_color,
+                }
+            };
+            button::Style {
+                text_color,
+                ..button::Style::default()
+            }
+        });
 
     let bar: Element<'_, Message> = if is_active {
-        container(Space::new().height(0))
-            .width(Length::Fill)
-            .height(2.5)
-            .style(move |_theme: &Theme| container::Style {
-                background: Some(palette.primary.into()),
-                ..Default::default()
-            })
-            .into()
+        // Inset underline: 12px from each edge, 2.5px tall, rounded top corners
+        container(
+            container(Space::new().height(0))
+                .width(Length::Fill)
+                .height(2.5)
+                .style(move |_theme: &Theme| container::Style {
+                    background: Some(palette.primary.into()),
+                    border: iced::border::Border {
+                        radius: iced::border::Radius {
+                            top_left: 2.0,
+                            top_right: 2.0,
+                            bottom_right: 0.0,
+                            bottom_left: 0.0,
+                        },
+                        ..iced::border::Border::default()
+                    },
+                    ..Default::default()
+                }),
+        )
+        .padding([0, 12])
+        .into()
     } else {
         Space::new().height(2.5).into()
     };
 
-    column![btn, bar].align_x(iced::Alignment::Center).into()
+    column![btn, bar]
+        .width(Length::Shrink)
+        .align_x(iced::Alignment::Center)
+        .into()
 }
 
 fn has_supported_extension(path: &std::path::Path) -> bool {

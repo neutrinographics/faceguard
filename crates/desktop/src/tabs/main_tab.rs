@@ -70,7 +70,11 @@ fn empty_state(fs: f32, tertiary: iced::Color, theme: &Theme) -> Element<'static
             text("\u{1F4C2}").size(scaled(14.0, fs)),
             text("Browse Files")
                 .size(scaled(14.0, fs))
-                .color(Color::WHITE),
+                .color(Color::WHITE)
+                .font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..iced::Font::DEFAULT
+                }),
         ]
         .spacing(8)
         .align_y(iced::Alignment::Center),
