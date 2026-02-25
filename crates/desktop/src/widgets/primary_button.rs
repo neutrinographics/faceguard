@@ -7,7 +7,7 @@ use iced_anim::transition::Easing;
 use iced_anim::AnimationBuilder;
 
 const HOVER_DARKEN: f32 = 0.05;
-const FLOAT_HEIGHT: f32 = 3.0;
+const FLOAT_HEIGHT: f32 = 1.5;
 const CORNER_RADIUS: f32 = 8.0;
 const ANIMATION_DURATION: Duration = Duration::from_millis(200);
 

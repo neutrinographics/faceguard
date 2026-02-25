@@ -1,15 +1,12 @@
 use std::path::Path;
 
-use iced::border::Border;
-
 use iced::widget::{button, column, container, progress_bar, row, text, Space};
-use iced::{Color, Element, Length, Theme};
+use iced::{Element, Length, Theme};
 
 use crate::app::{scaled, Message, ProcessingState};
-use crate::theme::{muted_color, surface_color, tertiary_color};
-use crate::widgets::dashed_container::{dashed_container, DashedBorderStyle};
+use crate::widgets::drop_zone;
+use crate::theme::{muted_color, tertiary_color};
 use crate::widgets::faces_well::{self, FacesWellState};
-use crate::widgets::primary_button;
 
 pub fn view<'a>(
     fs: f32,
@@ -19,12 +16,13 @@ pub fn view<'a>(
     faces_well: &FacesWellState,
     theme: &Theme,
     browse_hovered: bool,
+    drop_zone_hovered: bool,
 ) -> Element<'a, Message> {
     let muted = muted_color(theme);
     let tertiary = tertiary_color(theme);
 
     if input_path.is_none() {
-        return empty_state(fs, tertiary, theme, browse_hovered);
+        return drop_zone::view(fs, tertiary, theme, browse_hovered, drop_zone_hovered);
     }
 
     if let ProcessingState::Complete = processing {
@@ -36,110 +34,6 @@ pub fn view<'a>(
     }
 
     workflow_view(fs, input_path, output_path, processing, faces_well, theme)
-}
-
-fn empty_state(
-    fs: f32,
-    tertiary: iced::Color,
-    theme: &Theme,
-    browse_hovered: bool,
-) -> Element<'static, Message> {
-    let palette = theme.extended_palette();
-
-    let icon_circle = container(
-        text("\u{2B06}")
-            .size(scaled(22.0, fs))
-            .align_x(iced::Alignment::Center)
-            .align_y(iced::Alignment::Center),
-    )
-    .width(scaled(56.0, fs))
-    .height(scaled(56.0, fs))
-    .center_x(Length::Shrink)
-    .center_y(Length::Shrink)
-    .style(|theme: &Theme| {
-        let palette = theme.extended_palette();
-        container::Style {
-            background: Some(iced::Background::Color(Color {
-                a: 0.12,
-                ..palette.primary.base.color
-            })),
-            border: Border {
-                radius: 100.0.into(),
-                ..Border::default()
-            },
-            text_color: Some(palette.primary.base.color),
-            ..container::Style::default()
-        }
-    });
-
-    let browse_btn = primary_button::primary_button(
-        move || {
-            row![
-                text("\u{1F4C2}").size(scaled(14.0, fs)),
-                text("Browse Files")
-                    .size(scaled(14.0, fs))
-                    .color(Color::WHITE)
-                    .font(iced::Font {
-                        weight: iced::font::Weight::Bold,
-                        ..iced::Font::DEFAULT
-                    }),
-            ]
-            .spacing(8)
-            .align_y(iced::Alignment::Center)
-            .into()
-        },
-        Message::SelectInput,
-        browse_hovered,
-        Message::BrowseHover,
-        [10, 24],
-    );
-
-    let inner_content = column![
-        icon_circle,
-        Space::new().height(16),
-        text("Drop a file here to get started")
-            .size(scaled(17.0, fs))
-            .font(iced::Font {
-                weight: iced::font::Weight::Bold,
-                ..iced::Font::DEFAULT
-            }),
-        Space::new().height(6),
-        text("or click to browse your computer")
-            .size(scaled(14.0, fs))
-            .color(tertiary),
-        Space::new().height(20),
-        browse_btn,
-        Space::new().height(16),
-        text("MP4, MOV, AVI, JPG, PNG")
-            .size(scaled(12.0, fs))
-            .color(tertiary),
-    ]
-    .align_x(iced::Alignment::Center);
-
-    let border_color = Color {
-        a: 0.20,
-        ..palette.background.base.text
-    };
-    let bg_color = surface_color(theme);
-
-    let drop_zone = dashed_container(
-        DashedBorderStyle {
-            border_color,
-            border_width: 2.0,
-            dash_length: 3.0,
-            gap_length: 3.0,
-            corner_radius: 16.0,
-            background: bg_color,
-        },
-        [scaled(56.0, fs) as u16, 40],
-        inner_content,
-    );
-
-    container(drop_zone)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .center_y(Length::Fill)
-        .into()
 }
 
 fn complete_state<'a>(

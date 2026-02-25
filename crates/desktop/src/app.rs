@@ -89,6 +89,7 @@ pub enum Message {
     FileDropped(PathBuf),
     TabHover(usize, bool),
     BrowseHover(bool),
+    DropZoneHover(bool),
 }
 
 pub struct App {
@@ -106,6 +107,7 @@ pub struct App {
     worker_cancel: Option<Arc<AtomicBool>>,
     tab_hovered: [bool; 3],
     pub browse_hovered: bool,
+    pub drop_zone_hovered: bool,
 }
 
 impl App {
@@ -126,6 +128,7 @@ impl App {
                 worker_cancel: None,
                 tab_hovered: [false; 3],
                 browse_hovered: false,
+                drop_zone_hovered: false,
             },
             Task::none(),
         )
@@ -224,6 +227,9 @@ impl App {
             Message::BrowseHover(hovered) => {
                 self.browse_hovered = hovered;
             }
+            Message::DropZoneHover(hovered) => {
+                self.drop_zone_hovered = hovered;
+            }
         }
         Task::none()
     }
@@ -275,6 +281,7 @@ impl App {
                 &self.faces_well,
                 &current_theme,
                 self.browse_hovered,
+                self.drop_zone_hovered,
             ),
             Tab::Settings => tabs::settings_tab::view(&self.settings, self.gpu_context.is_some()),
             Tab::About => tabs::about_tab::view(fs, &current_theme),

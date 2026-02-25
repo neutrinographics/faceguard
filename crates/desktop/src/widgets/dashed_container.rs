@@ -1,7 +1,9 @@
+use std::time::Instant;
+
 use iced::advanced::graphics::geometry;
 use iced::advanced::layout;
 use iced::advanced::renderer;
-use iced::advanced::widget::tree::Tree;
+use iced::advanced::widget::tree::{self, Tree};
 use iced::advanced::widget::Widget;
 use iced::advanced::{Clipboard, Layout, Renderer as _, Shell};
 use iced::border::Border;
@@ -9,6 +11,8 @@ use iced::widget::canvas::{self, Frame, Path, Stroke};
 use iced::{
     alignment, Color, Element, Event, Length, Padding, Point, Rectangle, Renderer, Size, Theme,
 };
+
+const ANIMATION_SECS: f32 = 0.2;
 
 /// Configuration for the dashed border appearance.
 #[derive(Debug, Clone, Copy)]
@@ -25,8 +29,27 @@ pub struct DashedBorderStyle {
 pub struct DashedContainer<'a, Message> {
     content: Element<'a, Message>,
     style: DashedBorderStyle,
+    hover_style: Option<DashedBorderStyle>,
+    hovered: bool,
     padding: Padding,
     width: Length,
+}
+
+#[derive(Debug)]
+struct AnimState {
+    hover_amount: f32,
+    target: f32,
+    last_tick: Instant,
+}
+
+impl Default for AnimState {
+    fn default() -> Self {
+        Self {
+            hover_amount: 0.0,
+            target: 0.0,
+            last_tick: Instant::now(),
+        }
+    }
 }
 
 impl<'a, Message> DashedContainer<'a, Message> {
@@ -38,27 +61,39 @@ impl<'a, Message> DashedContainer<'a, Message> {
         Self {
             content: content.into(),
             style,
+            hover_style: None,
+            hovered: false,
             padding: padding.into(),
             width: Length::Fill,
         }
     }
+
+    pub fn hover_style(mut self, style: DashedBorderStyle, hovered: bool) -> Self {
+        self.hover_style = Some(style);
+        self.hovered = hovered;
+        self
+    }
 }
 
 impl<Message> Widget<Message, Theme, Renderer> for DashedContainer<'_, Message> {
-    fn tag(&self) -> iced::advanced::widget::tree::Tag {
-        self.content.as_widget().tag()
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<AnimState>()
     }
 
-    fn state(&self) -> iced::advanced::widget::tree::State {
-        self.content.as_widget().state()
+    fn state(&self) -> tree::State {
+        tree::State::new(AnimState::default())
     }
 
     fn children(&self) -> Vec<Tree> {
-        self.content.as_widget().children()
+        vec![Tree::new(&self.content)]
     }
 
     fn diff(&self, tree: &mut Tree) {
-        self.content.as_widget().diff(tree);
+        if tree.children.len() == 1 {
+            tree.children[0].diff(&self.content);
+        } else {
+            tree.children = vec![Tree::new(&self.content)];
+        }
     }
 
     fn size(&self) -> Size<Length> {
@@ -82,7 +117,7 @@ impl<Message> Widget<Message, Theme, Renderer> for DashedContainer<'_, Message> 
             |limits| {
                 self.content
                     .as_widget_mut()
-                    .layout(tree, renderer, &limits.loose())
+                    .layout(&mut tree.children[0], renderer, &limits.loose())
             },
             |content, size| {
                 content.align(
@@ -106,7 +141,7 @@ impl<Message> Widget<Message, Theme, Renderer> for DashedContainer<'_, Message> 
         viewport: &Rectangle,
     ) {
         self.content.as_widget_mut().update(
-            tree,
+            &mut tree.children[0],
             event,
             layout.children().next().unwrap(),
             cursor,
@@ -115,6 +150,30 @@ impl<Message> Widget<Message, Theme, Renderer> for DashedContainer<'_, Message> 
             shell,
             viewport,
         );
+
+        if self.hover_style.is_some() {
+            let Event::Window(iced::window::Event::RedrawRequested(now)) = event else {
+                return;
+            };
+
+            let state = tree.state.downcast_mut::<AnimState>();
+            state.target = if self.hovered { 1.0 } else { 0.0 };
+
+            if (state.hover_amount - state.target).abs() > 0.001 {
+                let dt = now.duration_since(state.last_tick).as_secs_f32();
+                let speed = 1.0 / ANIMATION_SECS;
+                if state.hover_amount < state.target {
+                    state.hover_amount = (state.hover_amount + speed * dt).min(state.target);
+                } else {
+                    state.hover_amount = (state.hover_amount - speed * dt).max(state.target);
+                }
+                shell.request_redraw();
+            } else {
+                state.hover_amount = state.target;
+            }
+
+            state.last_tick = *now;
+        }
     }
 
     fn mouse_interaction(
@@ -126,7 +185,7 @@ impl<Message> Widget<Message, Theme, Renderer> for DashedContainer<'_, Message> 
         renderer: &Renderer,
     ) -> iced::mouse::Interaction {
         self.content.as_widget().mouse_interaction(
-            tree,
+            &tree.children[0],
             layout.children().next().unwrap(),
             cursor,
             viewport,
@@ -147,9 +206,8 @@ impl<Message> Widget<Message, Theme, Renderer> for DashedContainer<'_, Message> 
         let bounds = layout.bounds();
 
         if let Some(clipped_viewport) = bounds.intersection(viewport) {
-            let s = &self.style;
+            let s = self.effective_style(tree);
 
-            // Draw background using fill_quad (same render pass as buttons)
             renderer.fill_quad(
                 renderer::Quad {
                     bounds,
@@ -162,9 +220,8 @@ impl<Message> Widget<Message, Theme, Renderer> for DashedContainer<'_, Message> 
                 s.background,
             );
 
-            // Draw child content
             self.content.as_widget().draw(
-                tree,
+                &tree.children[0],
                 renderer,
                 theme,
                 renderer_style,
@@ -173,7 +230,6 @@ impl<Message> Widget<Message, Theme, Renderer> for DashedContainer<'_, Message> 
                 &clipped_viewport,
             );
 
-            // Draw dashed border on top (only at edges, won't overlap inner content)
             let mut frame = Frame::new(renderer, bounds.size());
 
             let inset = s.border_width / 2.0;
@@ -212,6 +268,34 @@ impl<Message> Widget<Message, Theme, Renderer> for DashedContainer<'_, Message> 
     }
 }
 
+impl<Message> DashedContainer<'_, Message> {
+    fn effective_style(&self, tree: &Tree) -> DashedBorderStyle {
+        match self.hover_style {
+            Some(hover) => {
+                let t = tree.state.downcast_ref::<AnimState>().hover_amount;
+                DashedBorderStyle {
+                    border_color: lerp_color(self.style.border_color, hover.border_color, t),
+                    border_width: self.style.border_width,
+                    dash_length: self.style.dash_length,
+                    gap_length: self.style.gap_length,
+                    corner_radius: self.style.corner_radius,
+                    background: lerp_color(self.style.background, hover.background, t),
+                }
+            }
+            None => self.style,
+        }
+    }
+}
+
+fn lerp_color(from: Color, to: Color, t: f32) -> Color {
+    Color {
+        r: from.r + (to.r - from.r) * t,
+        g: from.g + (to.g - from.g) * t,
+        b: from.b + (to.b - from.b) * t,
+        a: from.a + (to.a - from.a) * t,
+    }
+}
+
 impl<'a, Message: 'a> From<DashedContainer<'a, Message>> for Element<'a, Message> {
     fn from(container: DashedContainer<'a, Message>) -> Self {
         Element::new(container)
@@ -223,6 +307,6 @@ pub fn dashed_container<'a, Message: 'a>(
     style: DashedBorderStyle,
     padding: impl Into<Padding>,
     content: impl Into<Element<'a, Message>>,
-) -> Element<'a, Message> {
-    DashedContainer::new(style, padding, content).into()
+) -> DashedContainer<'a, Message> {
+    DashedContainer::new(style, padding, content)
 }
