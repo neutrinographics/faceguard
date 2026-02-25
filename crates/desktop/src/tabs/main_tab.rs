@@ -5,8 +5,8 @@ use iced::{Element, Length, Theme};
 
 use crate::app::{scaled, Message, ProcessingState};
 use crate::widgets::drop_zone;
+use crate::widgets::file_row;
 use crate::widgets::primary_button;
-use crate::widgets::secondary_button;
 use crate::theme::{muted_color, tertiary_color};
 use crate::widgets::faces_well::{self, FacesWellState};
 
@@ -133,7 +133,7 @@ fn workflow_view<'a>(
 
     if !is_processing {
         col = col
-            .push(file_row(
+            .push(file_row::file_row(
                 fs,
                 "Input",
                 input_path,
@@ -143,7 +143,7 @@ fn workflow_view<'a>(
                 theme,
             ))
             .push(Space::new().height(12))
-            .push(file_row(
+            .push(file_row::file_row(
                 fs,
                 "Saves to",
                 output_path,
@@ -359,51 +359,3 @@ fn centered(content: Element<'_, Message>) -> Element<'_, Message> {
         .into()
 }
 
-fn file_row<'a>(
-    fs: f32,
-    label: &str,
-    path: Option<&Path>,
-    on_browse: Message,
-    hovered: bool,
-    on_hover: impl Fn(bool) -> Message + 'a,
-    theme: &Theme,
-) -> Element<'a, Message> {
-    let tertiary = tertiary_color(theme);
-
-    let display_text: Element<'a, Message> = if let Some(name) = path.and_then(|p| p.file_name()) {
-        text(name.to_string_lossy().to_string())
-            .size(scaled(15.0, fs))
-            .into()
-    } else {
-        text("No file selected")
-            .size(scaled(15.0, fs))
-            .color(tertiary)
-            .into()
-    };
-
-    let btn = secondary_button::secondary_button_small(
-        move || {
-            text("Change")
-                .size(scaled(13.0, fs))
-                .into()
-        },
-        on_browse,
-        hovered,
-        on_hover,
-        [6, 14],
-    );
-
-    let label_text = text(label.to_uppercase())
-        .size(scaled(11.0, fs))
-        .color(tertiary);
-
-    let content = row![column![label_text, display_text].width(Length::Fill), btn]
-        .spacing(8)
-        .align_y(iced::Alignment::Center);
-
-    container(content)
-        .padding([14, 16])
-        .style(container::rounded_box)
-        .width(Length::Fill)
-        .into()
-}
