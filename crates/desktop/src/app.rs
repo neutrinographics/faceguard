@@ -216,16 +216,15 @@ impl App {
         let fs = self.settings.font_scale;
         let current_theme = self.theme();
         let palette = current_theme.palette();
-        let muted = theme::muted_color(&current_theme);
 
         let tab_bar = container(
             row(Tab::ALL
                 .iter()
-                .map(|&tab| tab_button(tab, tab == self.active_tab, palette, muted, fs))
+                .map(|&tab| tab_button(tab, tab == self.active_tab, palette, fs))
                 .collect::<Vec<_>>())
             .spacing(0),
         )
-        .padding([0, 8]);
+        .padding([0, 20]);
 
         let content: Element<'_, Message> = match self.active_tab {
             Tab::Blur => tabs::main_tab::view(
@@ -489,11 +488,18 @@ fn tab_button<'a>(
     tab: Tab,
     is_active: bool,
     palette: iced::theme::Palette,
-    muted: iced::Color,
     fs: f32,
 ) -> Element<'a, Message> {
-    let label_color = if is_active { palette.primary } else { muted };
-    let label = text(tab.label()).size(scaled(13.0, fs)).color(label_color);
+    let inactive_color = iced::Color {
+        a: 0.45,
+        ..palette.text
+    };
+    let label_color = if is_active {
+        palette.primary
+    } else {
+        inactive_color
+    };
+    let label = text(tab.label()).size(scaled(14.0, fs)).color(label_color);
     let btn = button(label)
         .on_press(Message::TabSelected(tab))
         .padding([12, 20])
@@ -502,14 +508,14 @@ fn tab_button<'a>(
     let bar: Element<'_, Message> = if is_active {
         container(Space::new().height(0))
             .width(Length::Fill)
-            .height(2)
+            .height(2.5)
             .style(move |_theme: &Theme| container::Style {
                 background: Some(palette.primary.into()),
                 ..Default::default()
             })
             .into()
     } else {
-        Space::new().height(2).into()
+        Space::new().height(2.5).into()
     };
 
     column![btn, bar].align_x(iced::Alignment::Center).into()

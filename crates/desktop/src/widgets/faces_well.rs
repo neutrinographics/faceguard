@@ -5,9 +5,9 @@ use iced::widget::{button, checkbox, column, container, image, row, text, Space}
 use iced::{Element, Length, Theme};
 
 use crate::app::{scaled, Message};
-use crate::theme::muted_color;
+use crate::theme::tertiary_color;
 
-const CARD_SIZE: f32 = 96.0;
+const CARD_SIZE: f32 = 104.0;
 const CARD_SPACING: f32 = 10.0;
 
 pub struct FacesWellState {
@@ -95,18 +95,35 @@ pub fn view<'a>(state: &FacesWellState, fs: f32, theme: &Theme) -> Element<'a, M
         return column![].into();
     }
 
-    let muted = muted_color(theme);
+    let tertiary = tertiary_color(theme);
     let selected = state.selected_count();
     let total = state.total_count();
 
-    let label = if state.group_faces && !state.groups.is_empty() {
+    let count_label = if state.group_faces && !state.groups.is_empty() {
         format!(
-            "{selected} of {total} faces selected ({} groups)",
+            "{selected} of {total} selected ({} groups)",
             state.groups.len()
         )
     } else {
-        format!("{selected} of {total} faces selected")
+        format!("{selected} of {total} selected")
     };
+
+    // Header row: title + count on left, group toggle on right
+    let header = row![
+        row![
+            text("Detected Faces").size(scaled(15.0, fs)),
+            Space::new().width(10),
+            text(count_label).size(scaled(13.0, fs)).color(tertiary),
+        ]
+        .align_y(iced::Alignment::Center),
+        Space::new().width(Length::Fill),
+        checkbox(state.group_faces)
+            .label("Group similar")
+            .on_toggle(Message::GroupFacesToggled)
+            .text_size(scaled(13.0, fs)),
+    ]
+    .spacing(8)
+    .align_y(iced::Alignment::Center);
 
     let grid = if state.group_faces && !state.groups.is_empty() {
         build_grouped_grid(state, fs)
@@ -114,26 +131,10 @@ pub fn view<'a>(state: &FacesWellState, fs: f32, theme: &Theme) -> Element<'a, M
         build_individual_grid(state, fs)
     };
 
-    let footer = row![
-        checkbox(state.group_faces)
-            .label("Group similar faces")
-            .on_toggle(Message::GroupFacesToggled)
-            .text_size(scaled(12.0, fs)),
-        Space::new().width(Length::Fill),
-        text(label).size(scaled(11.0, fs)).color(muted),
-    ]
-    .spacing(8)
-    .align_y(iced::Alignment::Center);
-
-    container(
-        column![grid, Space::new().height(10), footer]
-            .spacing(0)
-            .width(Length::Fill),
-    )
-    .padding(10)
-    .style(container::rounded_box)
-    .width(Length::Fill)
-    .into()
+    column![header, Space::new().height(14), grid,]
+        .spacing(0)
+        .width(Length::Fill)
+        .into()
 }
 
 fn build_individual_grid<'a>(state: &FacesWellState, fs: f32) -> Element<'a, Message> {
@@ -168,7 +169,7 @@ fn build_grouped_grid<'a>(state: &FacesWellState, fs: f32) -> Element<'a, Messag
             let path = state.crops.get(representative_id)?;
             let all_selected = group.iter().all(|id| state.selected.contains(id));
             let badge = if group.len() > 1 {
-                Some(format!("x{}", group.len()))
+                Some(format!("\u{00d7}{}", group.len()))
             } else {
                 None
             };
@@ -186,7 +187,7 @@ fn build_grouped_grid<'a>(state: &FacesWellState, fs: f32) -> Element<'a, Messag
 }
 
 fn wrap_cards(cards: Vec<Element<'_, Message>>) -> Element<'_, Message> {
-    let cards_per_row = ((480.0) / (CARD_SIZE + CARD_SPACING)).floor() as usize;
+    let cards_per_row = ((548.0) / (CARD_SIZE + CARD_SPACING)).floor() as usize;
     let cards_per_row = cards_per_row.max(1);
 
     let mut rows_col = column![].spacing(CARD_SPACING);
