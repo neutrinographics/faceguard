@@ -91,6 +91,8 @@ pub enum Message {
     BrowseHover(bool),
     DropZoneHover(bool),
     BlurButtonHover(bool),
+    ChangeInputHover(bool),
+    ChangeOutputHover(bool),
 }
 
 pub struct App {
@@ -110,6 +112,8 @@ pub struct App {
     pub browse_hovered: bool,
     pub drop_zone_hovered: bool,
     pub blur_button_hovered: bool,
+    pub change_input_hovered: bool,
+    pub change_output_hovered: bool,
 }
 
 impl App {
@@ -132,6 +136,8 @@ impl App {
                 browse_hovered: false,
                 drop_zone_hovered: false,
                 blur_button_hovered: false,
+                change_input_hovered: false,
+                change_output_hovered: false,
             },
             Task::none(),
         )
@@ -236,6 +242,12 @@ impl App {
             Message::BlurButtonHover(hovered) => {
                 self.blur_button_hovered = hovered;
             }
+            Message::ChangeInputHover(hovered) => {
+                self.change_input_hovered = hovered;
+            }
+            Message::ChangeOutputHover(hovered) => {
+                self.change_output_hovered = hovered;
+            }
         }
         Task::none()
     }
@@ -289,6 +301,8 @@ impl App {
                 self.browse_hovered,
                 self.drop_zone_hovered,
                 self.blur_button_hovered,
+                self.change_input_hovered,
+                self.change_output_hovered,
             ),
             Tab::Settings => tabs::settings_tab::view(&self.settings, self.gpu_context.is_some()),
             Tab::About => tabs::about_tab::view(fs, &current_theme),

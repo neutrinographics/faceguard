@@ -6,6 +6,7 @@ use iced::{Element, Length, Theme};
 use crate::app::{scaled, Message, ProcessingState};
 use crate::widgets::drop_zone;
 use crate::widgets::primary_button;
+use crate::widgets::secondary_button;
 use crate::theme::{muted_color, tertiary_color};
 use crate::widgets::faces_well::{self, FacesWellState};
 
@@ -19,6 +20,8 @@ pub fn view<'a>(
     browse_hovered: bool,
     drop_zone_hovered: bool,
     blur_button_hovered: bool,
+    change_input_hovered: bool,
+    change_output_hovered: bool,
 ) -> Element<'a, Message> {
     let muted = muted_color(theme);
     let tertiary = tertiary_color(theme);
@@ -35,7 +38,7 @@ pub fn view<'a>(
         return error_state(fs, muted, tertiary, e);
     }
 
-    workflow_view(fs, input_path, output_path, processing, faces_well, theme, blur_button_hovered)
+    workflow_view(fs, input_path, output_path, processing, faces_well, theme, blur_button_hovered, change_input_hovered, change_output_hovered)
 }
 
 fn complete_state<'a>(
@@ -113,6 +116,8 @@ fn workflow_view<'a>(
     faces_well: &FacesWellState,
     theme: &Theme,
     blur_button_hovered: bool,
+    change_input_hovered: bool,
+    change_output_hovered: bool,
 ) -> Element<'a, Message> {
     let muted = muted_color(theme);
     let tertiary = tertiary_color(theme);
@@ -133,6 +138,8 @@ fn workflow_view<'a>(
                 "Input",
                 input_path,
                 Message::SelectInput,
+                change_input_hovered,
+                Message::ChangeInputHover,
                 theme,
             ))
             .push(Space::new().height(12))
@@ -141,6 +148,8 @@ fn workflow_view<'a>(
                 "Saves to",
                 output_path,
                 Message::SelectOutput,
+                change_output_hovered,
+                Message::ChangeOutputHover,
                 theme,
             ))
             .push(Space::new().height(20));
@@ -355,6 +364,8 @@ fn file_row<'a>(
     label: &str,
     path: Option<&Path>,
     on_browse: Message,
+    hovered: bool,
+    on_hover: impl Fn(bool) -> Message + 'a,
     theme: &Theme,
 ) -> Element<'a, Message> {
     let tertiary = tertiary_color(theme);
@@ -370,10 +381,17 @@ fn file_row<'a>(
             .into()
     };
 
-    let btn = button(text("Change").size(scaled(13.0, fs)))
-        .padding([6, 14])
-        .on_press(on_browse)
-        .style(button::secondary);
+    let btn = secondary_button::secondary_button_small(
+        move || {
+            text("Change")
+                .size(scaled(13.0, fs))
+                .into()
+        },
+        on_browse,
+        hovered,
+        on_hover,
+        [6, 14],
+    );
 
     let label_text = text(label.to_uppercase())
         .size(scaled(11.0, fs))
