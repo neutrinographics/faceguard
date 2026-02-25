@@ -24,6 +24,7 @@ pub fn view<'a>(
     change_input_hovered: bool,
     change_output_hovered: bool,
     choose_faces_hovered: bool,
+    cancel_hovered: bool,
 ) -> Element<'a, Message> {
     let muted = muted_color(theme);
     let tertiary = tertiary_color(theme);
@@ -40,7 +41,7 @@ pub fn view<'a>(
         return error_state(fs, muted, tertiary, e);
     }
 
-    workflow_view(fs, input_path, output_path, processing, faces_well, theme, blur_button_hovered, change_input_hovered, change_output_hovered, choose_faces_hovered)
+    workflow_view(fs, input_path, output_path, processing, faces_well, theme, blur_button_hovered, change_input_hovered, change_output_hovered, choose_faces_hovered, cancel_hovered)
 }
 
 fn complete_state<'a>(
@@ -121,6 +122,7 @@ fn workflow_view<'a>(
     change_input_hovered: bool,
     change_output_hovered: bool,
     choose_faces_hovered: bool,
+    cancel_hovered: bool,
 ) -> Element<'a, Message> {
     let muted = muted_color(theme);
     let tertiary = tertiary_color(theme);
@@ -206,6 +208,7 @@ fn workflow_view<'a>(
                 tertiary,
                 "Preparing\u{2026}",
                 None,
+                cancel_hovered,
             ));
         }
         ProcessingState::Downloading(downloaded, total) => {
@@ -215,7 +218,7 @@ fn workflow_view<'a>(
             } else {
                 format!("Downloading model\u{2026} {} bytes", downloaded)
             };
-            col = col.push(progress_with_cancel(fs, muted, tertiary, &status, None));
+            col = col.push(progress_with_cancel(fs, muted, tertiary, &status, None, cancel_hovered));
         }
         ProcessingState::Scanning(current, total) => {
             let (status, detail, pct) = frame_progress("Scanning", *current, *total);
@@ -226,6 +229,7 @@ fn workflow_view<'a>(
                 &status,
                 &detail,
                 Some(pct),
+                cancel_hovered,
             ));
         }
         ProcessingState::Previewed => {
@@ -270,6 +274,7 @@ fn workflow_view<'a>(
                 &status,
                 &detail,
                 Some(pct),
+                cancel_hovered,
             ));
         }
         _ => {}
@@ -284,6 +289,7 @@ fn progress_with_cancel<'a>(
     tertiary: iced::Color,
     status: &str,
     progress: Option<f32>,
+    cancel_hovered: bool,
 ) -> Element<'a, Message> {
     let mut col = column![text(status.to_owned())
         .size(scaled(15.0, fs))
@@ -297,12 +303,13 @@ fn progress_with_cancel<'a>(
     }
 
     col = col.push(Space::new().height(16));
-    col = col.push(
-        button(text("Cancel").size(scaled(13.0, fs)))
-            .on_press(Message::CancelWork)
-            .padding([8, 20])
-            .style(button::secondary),
-    );
+    col = col.push(secondary_button::secondary_button_small(
+        move || text("Cancel").size(scaled(13.0, fs)).into(),
+        Message::CancelWork,
+        cancel_hovered,
+        Message::CancelHover,
+        [8, 20],
+    ));
 
     container(col)
         .width(Length::Fill)
@@ -318,6 +325,7 @@ fn progress_with_cancel_detail<'a>(
     status: &str,
     detail: &str,
     progress: Option<f32>,
+    cancel_hovered: bool,
 ) -> Element<'a, Message> {
     let mut col = column![text(status.to_owned()).size(scaled(15.0, fs))]
         .spacing(8)
@@ -334,12 +342,13 @@ fn progress_with_cancel_detail<'a>(
             .color(tertiary),
     );
     col = col.push(Space::new().height(16));
-    col = col.push(
-        button(text("Cancel").size(scaled(13.0, fs)))
-            .on_press(Message::CancelWork)
-            .padding([8, 20])
-            .style(button::secondary),
-    );
+    col = col.push(secondary_button::secondary_button_small(
+        move || text("Cancel").size(scaled(13.0, fs)).into(),
+        Message::CancelWork,
+        cancel_hovered,
+        Message::CancelHover,
+        [8, 20],
+    ));
 
     container(col)
         .width(Length::Fill)
