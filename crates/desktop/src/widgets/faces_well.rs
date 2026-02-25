@@ -8,8 +8,6 @@ use crate::app::{scaled, Message};
 use crate::theme::tertiary_color;
 use crate::widgets::face_card;
 
-const CARD_SIZE: f32 = 104.0;
-const BORDER_WIDTH: f32 = 2.5;
 const CARD_SPACING: f32 = 10.0;
 
 pub struct FacesWellState {
@@ -195,8 +193,7 @@ fn build_grouped_grid<'a>(state: &FacesWellState, fs: f32, theme: &Theme, hovere
 }
 
 fn wrap_cards(cards: Vec<Element<'_, Message>>) -> Element<'_, Message> {
-    let full_card_width = CARD_SIZE + BORDER_WIDTH * 2.0;
-    let cards_per_row = ((548.0) / (full_card_width + CARD_SPACING)).floor() as usize;
+    let cards_per_row = ((548.0) / (face_card::FULL_CARD_SIZE + CARD_SPACING)).floor() as usize;
     let cards_per_row = cards_per_row.max(1);
 
     let mut rows_col = column![].spacing(CARD_SPACING);

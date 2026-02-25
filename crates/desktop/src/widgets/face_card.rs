@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use iced::widget::{button, container, image, mouse_area, row, stack, text, Space};
-use iced::{Color, Element, Length, Theme};
+use iced::{Color, Element, Length, Padding, Theme};
 use iced_anim::transition::Easing;
 use iced_anim::AnimationBuilder;
 
@@ -13,8 +13,11 @@ const CORNER_RADIUS: f32 = 12.0;
 const BORDER_WIDTH: f32 = 2.5;
 const BADGE_RADIUS: f32 = 10.0;
 const CHECK_SIZE: f32 = 20.0;
-const SCALE_GROW: f32 = 3.0; // pixels to grow on each side (~3% of 104)
+const SCALE_GROW: f32 = 3.0;
 const ANIMATION_DURATION: Duration = Duration::from_millis(200);
+
+/// The outer size each card occupies in the grid (fixed, never changes with hover).
+pub const FULL_CARD_SIZE: f32 = CARD_SIZE + BORDER_WIDTH * 2.0;
 
 pub fn face_card<'a>(
     path: &Path,
@@ -34,9 +37,18 @@ pub fn face_card<'a>(
 
     let animated: Element<'a, Message> = AnimationBuilder::new(target, move |t: f32| {
         let t = t.clamp(0.0, 1.0);
-        build_card(&path_buf, selected, &on_press, &badge, t, palette, surface_alt, fs)
+        build_card(
+            &path_buf,
+            selected,
+            &on_press,
+            &badge,
+            t,
+            palette,
+            surface_alt,
+            fs,
+        )
     })
-    .animates_layout(true)
+    .animates_layout(false)
     .animation(Easing::EASE_OUT.with_duration(ANIMATION_DURATION))
     .into();
 
@@ -123,7 +135,7 @@ fn build_card<'a>(
         .align_y(iced::alignment::Vertical::Bottom);
 
     let overlay_el: Element<'a, Message> = overlay.into();
-    let card_stack = stack![img, overlay_el].clip(true);
+    let card_stack = stack![img, overlay_el];
 
     let border_color = if selected {
         palette.primary
@@ -134,7 +146,21 @@ fn build_card<'a>(
         }
     };
 
-    let btn = button(card_stack)
+    // Inner radius for content clipping (outer radius minus border width)
+    let inner_radius = (CORNER_RADIUS - BORDER_WIDTH).max(0.0);
+
+    // Clip the stack content to rounded corners
+    let clipped_content = container(card_stack)
+        .clip(true)
+        .style(move |_theme: &Theme| container::Style {
+            border: iced::border::Border {
+                radius: inner_radius.into(),
+                ..iced::border::Border::default()
+            },
+            ..container::Style::default()
+        });
+
+    let btn = button(clipped_content)
         .on_press(on_press.clone())
         .padding(0)
         .style(move |_theme: &Theme, _status: button::Status| button::Style {
@@ -147,8 +173,21 @@ fn build_card<'a>(
             ..button::Style::default()
         });
 
-    container(btn)
-        .width(card_size + BORDER_WIDTH * 2.0)
+    // Fixed outer size — hover grows inward via negative padding
+    let btn_size = card_size + BORDER_WIDTH * 2.0;
+    let inset = grow;
+
+    container(container(btn).width(btn_size).height(btn_size))
+        .width(FULL_CARD_SIZE)
+        .height(FULL_CARD_SIZE)
+        .padding(Padding {
+            top: -inset,
+            bottom: -inset,
+            left: -inset,
+            right: -inset,
+        })
+        .center_x(FULL_CARD_SIZE)
+        .center_y(FULL_CARD_SIZE)
         .into()
 }
 
