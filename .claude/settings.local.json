@@ -24,7 +24,9 @@
       "Bash(cargo build:*)",
       "WebFetch(domain:docs.rs)",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "WebFetch(domain:claude.ai)"
+      "WebFetch(domain:claude.ai)",
+      "WebFetch(domain:)",
+      "Bash(git stash:*)"
     ]
   }
 }

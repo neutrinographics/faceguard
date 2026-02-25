@@ -5,6 +5,7 @@ use iced::{Element, Length, Theme};
 
 use crate::app::{scaled, Message, ProcessingState};
 use crate::widgets::drop_zone;
+use crate::widgets::primary_button;
 use crate::theme::{muted_color, tertiary_color};
 use crate::widgets::faces_well::{self, FacesWellState};
 
@@ -17,6 +18,7 @@ pub fn view<'a>(
     theme: &Theme,
     browse_hovered: bool,
     drop_zone_hovered: bool,
+    blur_button_hovered: bool,
 ) -> Element<'a, Message> {
     let muted = muted_color(theme);
     let tertiary = tertiary_color(theme);
@@ -33,7 +35,7 @@ pub fn view<'a>(
         return error_state(fs, muted, tertiary, e);
     }
 
-    workflow_view(fs, input_path, output_path, processing, faces_well, theme)
+    workflow_view(fs, input_path, output_path, processing, faces_well, theme, blur_button_hovered)
 }
 
 fn complete_state<'a>(
@@ -110,6 +112,7 @@ fn workflow_view<'a>(
     processing: &ProcessingState,
     faces_well: &FacesWellState,
     theme: &Theme,
+    blur_button_hovered: bool,
 ) -> Element<'a, Message> {
     let muted = muted_color(theme);
     let tertiary = tertiary_color(theme);
@@ -145,13 +148,26 @@ fn workflow_view<'a>(
 
     match processing {
         ProcessingState::Idle => {
+            let blur_btn = primary_button::primary_button_fill(
+                move || {
+                    text("Blur All Faces")
+                        .size(scaled(15.0, fs))
+                        .color(iced::Color::WHITE)
+                        .font(iced::Font {
+                            weight: iced::font::Weight::Bold,
+                            ..iced::Font::DEFAULT
+                        })
+                        .align_x(iced::Alignment::Center)
+                        .width(Length::Fill)
+                        .into()
+                },
+                Message::RunBlur,
+                blur_button_hovered,
+                Message::BlurButtonHover,
+                [14, 24],
+            );
             col = col
-                .push(
-                    button(text("Blur All Faces").size(scaled(15.0, fs)))
-                        .on_press(Message::RunBlur)
-                        .padding([14, 24])
-                        .width(Length::Fill),
-                )
+                .push(blur_btn)
                 .push(Space::new().height(10))
                 .push(
                     button(text("Choose Specific Faces\u{2026}").size(scaled(14.0, fs)))
@@ -191,15 +207,30 @@ fn workflow_view<'a>(
             ));
         }
         ProcessingState::Previewed => {
+            let blur_btn = primary_button::primary_button_fill(
+                move || {
+                    text("Blur Selected Faces")
+                        .size(scaled(15.0, fs))
+                        .color(iced::Color::WHITE)
+                        .font(iced::Font {
+                            weight: iced::font::Weight::Bold,
+                            ..iced::Font::DEFAULT
+                        })
+                        .align_x(iced::Alignment::Center)
+                        .width(Length::Fill)
+                        .into()
+                },
+                Message::RunBlur,
+                blur_button_hovered,
+                Message::BlurButtonHover,
+                [14, 24],
+            );
             col = col
                 .push(faces_well::view(faces_well, fs, theme))
                 .push(Space::new().height(16))
                 .push(
                     row![
-                        button(text("Blur Selected Faces").size(scaled(15.0, fs)))
-                            .on_press(Message::RunBlur)
-                            .padding([14, 24])
-                            .width(Length::Fill),
+                        blur_btn,
                         button(text("Re-scan").size(scaled(14.0, fs)))
                             .on_press(Message::RunPreview)
                             .padding([14, 20])

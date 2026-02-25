@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use iced::border::Border;
 use iced::widget::{button, container, mouse_area};
-use iced::{Color, Element, Padding, Theme};
+use iced::{Color, Element, Length, Padding, Theme};
 use iced_anim::transition::Easing;
 use iced_anim::AnimationBuilder;
 
@@ -18,11 +18,32 @@ pub fn primary_button<'a, Message: Clone + 'a>(
     on_hover: impl Fn(bool) -> Message + 'a,
     padding: [u16; 2],
 ) -> Element<'a, Message> {
+    primary_button_with_width(content, on_press, hovered, on_hover, padding, Length::Shrink)
+}
+
+pub fn primary_button_fill<'a, Message: Clone + 'a>(
+    content: impl Fn() -> Element<'a, Message> + 'a,
+    on_press: Message,
+    hovered: bool,
+    on_hover: impl Fn(bool) -> Message + 'a,
+    padding: [u16; 2],
+) -> Element<'a, Message> {
+    primary_button_with_width(content, on_press, hovered, on_hover, padding, Length::Fill)
+}
+
+fn primary_button_with_width<'a, Message: Clone + 'a>(
+    content: impl Fn() -> Element<'a, Message> + 'a,
+    on_press: Message,
+    hovered: bool,
+    on_hover: impl Fn(bool) -> Message + 'a,
+    padding: [u16; 2],
+    width: Length,
+) -> Element<'a, Message> {
     let target = if hovered { 1.0_f32 } else { 0.0 };
 
     let animated: Element<'a, Message> = AnimationBuilder::new(target, move |t: f32| {
         let t = t.clamp(0.0, 1.0);
-        build_button(&content, &on_press, padding, t)
+        build_button(&content, &on_press, padding, width, t)
     })
     .animates_layout(true)
     .animation(Easing::EASE_OUT.with_duration(ANIMATION_DURATION))
@@ -38,11 +59,13 @@ fn build_button<'a, Message: Clone + 'a>(
     content: &dyn Fn() -> Element<'a, Message>,
     on_press: &Message,
     padding: [u16; 2],
+    width: Length,
     hover_amount: f32,
 ) -> Element<'a, Message> {
     let btn = button(content())
         .on_press(on_press.clone())
         .padding(padding)
+        .width(width)
         .style(move |theme: &Theme, status: button::Status| {
             let base = theme.extended_palette().primary.base.color;
             let amount = if status == button::Status::Pressed {
