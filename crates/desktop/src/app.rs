@@ -88,6 +88,7 @@ pub enum Message {
     PollSystemTheme,
     FileDropped(PathBuf),
     TabHover(usize, bool),
+    BrowseHover(bool),
 }
 
 pub struct App {
@@ -104,6 +105,7 @@ pub struct App {
     worker_rx: Option<Receiver<WorkerMessage>>,
     worker_cancel: Option<Arc<AtomicBool>>,
     tab_hovered: [bool; 3],
+    pub browse_hovered: bool,
 }
 
 impl App {
@@ -123,6 +125,7 @@ impl App {
                 worker_rx: None,
                 worker_cancel: None,
                 tab_hovered: [false; 3],
+                browse_hovered: false,
             },
             Task::none(),
         )
@@ -218,6 +221,9 @@ impl App {
                     self.tab_hovered[idx] = hovered;
                 }
             }
+            Message::BrowseHover(hovered) => {
+                self.browse_hovered = hovered;
+            }
         }
         Task::none()
     }
@@ -268,6 +274,7 @@ impl App {
                 &self.processing,
                 &self.faces_well,
                 &current_theme,
+                self.browse_hovered,
             ),
             Tab::Settings => tabs::settings_tab::view(&self.settings, self.gpu_context.is_some()),
             Tab::About => tabs::about_tab::view(fs, &current_theme),

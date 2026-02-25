@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use iced::border::Border;
+
 use iced::widget::{button, column, container, progress_bar, row, text, Space};
 use iced::{Color, Element, Length, Theme};
 
@@ -17,12 +18,13 @@ pub fn view<'a>(
     processing: &ProcessingState,
     faces_well: &FacesWellState,
     theme: &Theme,
+    browse_hovered: bool,
 ) -> Element<'a, Message> {
     let muted = muted_color(theme);
     let tertiary = tertiary_color(theme);
 
     if input_path.is_none() {
-        return empty_state(fs, tertiary, theme);
+        return empty_state(fs, tertiary, theme, browse_hovered);
     }
 
     if let ProcessingState::Complete = processing {
@@ -36,7 +38,12 @@ pub fn view<'a>(
     workflow_view(fs, input_path, output_path, processing, faces_well, theme)
 }
 
-fn empty_state(fs: f32, tertiary: iced::Color, theme: &Theme) -> Element<'static, Message> {
+fn empty_state(
+    fs: f32,
+    tertiary: iced::Color,
+    theme: &Theme,
+    browse_hovered: bool,
+) -> Element<'static, Message> {
     let palette = theme.extended_palette();
 
     let icon_circle = container(
@@ -66,21 +73,26 @@ fn empty_state(fs: f32, tertiary: iced::Color, theme: &Theme) -> Element<'static
     });
 
     let browse_btn = primary_button::primary_button(
-        row![
-            text("\u{1F4C2}").size(scaled(14.0, fs)),
-            text("Browse Files")
-                .size(scaled(14.0, fs))
-                .color(Color::WHITE)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..iced::Font::DEFAULT
-                }),
-        ]
-        .spacing(8)
-        .align_y(iced::Alignment::Center),
-    )
-    .on_press(Message::SelectInput)
-    .padding([10, 24]);
+        move || {
+            row![
+                text("\u{1F4C2}").size(scaled(14.0, fs)),
+                text("Browse Files")
+                    .size(scaled(14.0, fs))
+                    .color(Color::WHITE)
+                    .font(iced::Font {
+                        weight: iced::font::Weight::Bold,
+                        ..iced::Font::DEFAULT
+                    }),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center)
+            .into()
+        },
+        Message::SelectInput,
+        browse_hovered,
+        Message::BrowseHover,
+        [10, 24],
+    );
 
     let inner_content = column![
         icon_circle,
