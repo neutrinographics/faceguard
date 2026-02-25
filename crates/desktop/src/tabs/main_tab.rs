@@ -110,8 +110,8 @@ fn empty_state(fs: f32, tertiary: iced::Color, theme: &Theme) -> Element<'static
         DashedBorderStyle {
             border_color,
             border_width: 2.0,
-            dash_length: 5.0,
-            gap_length: 4.0,
+            dash_length: 3.0,
+            gap_length: 3.0,
             corner_radius: 16.0,
             background: bg_color,
         },
