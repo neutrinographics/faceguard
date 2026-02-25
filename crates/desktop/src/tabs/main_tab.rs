@@ -8,6 +8,7 @@ use crate::app::{scaled, Message, ProcessingState};
 use crate::theme::{muted_color, surface_color, tertiary_color};
 use crate::widgets::dashed_container::{dashed_container, DashedBorderStyle};
 use crate::widgets::faces_well::{self, FacesWellState};
+use crate::widgets::primary_button;
 
 pub fn view<'a>(
     fs: f32,
@@ -64,8 +65,7 @@ fn empty_state(fs: f32, tertiary: iced::Color, theme: &Theme) -> Element<'static
         }
     });
 
-    let primary_color = palette.primary.base.color;
-    let browse_btn = button(
+    let browse_btn = primary_button::primary_button(
         row![
             text("\u{1F4C2}").size(scaled(14.0, fs)),
             text("Browse Files")
@@ -76,27 +76,7 @@ fn empty_state(fs: f32, tertiary: iced::Color, theme: &Theme) -> Element<'static
         .align_y(iced::Alignment::Center),
     )
     .on_press(Message::SelectInput)
-    .padding([10, 24])
-    .style(move |_theme: &Theme, status: button::Status| {
-        let bg = match status {
-            button::Status::Hovered | button::Status::Pressed => Color {
-                r: (primary_color.r - 0.05).max(0.0),
-                g: (primary_color.g - 0.05).max(0.0),
-                b: (primary_color.b - 0.05).max(0.0),
-                a: 1.0,
-            },
-            _ => primary_color,
-        };
-        button::Style {
-            background: Some(iced::Background::Color(bg)),
-            text_color: Color::WHITE,
-            border: Border {
-                radius: 8.0.into(),
-                ..Border::default()
-            },
-            ..button::Style::default()
-        }
-    });
+    .padding([10, 24]);
 
     let inner_content = column![
         icon_circle,
