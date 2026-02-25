@@ -299,7 +299,7 @@ fn progress_with_cancel<'a>(
     .width(Length::Fill);
 
     if let Some(pct) = progress {
-        col = col.push(progress_bar(0.0..=100.0, pct));
+        col = col.push(styled_progress_bar(pct));
     }
 
     col = col.push(Space::new().height(16));
@@ -333,7 +333,7 @@ fn progress_with_cancel_detail<'a>(
         .width(Length::Fill);
 
     if let Some(pct) = progress {
-        col = col.push(progress_bar(0.0..=100.0, pct));
+        col = col.push(styled_progress_bar(pct));
     }
 
     col = col.push(
@@ -354,6 +354,39 @@ fn progress_with_cancel_detail<'a>(
         .width(Length::Fill)
         .center_x(Length::Fill)
         .padding([48, 40])
+        .into()
+}
+
+fn styled_progress_bar(pct: f32) -> Element<'static, Message> {
+    progress_bar(0.0..=100.0, pct)
+        .girth(8.0)
+        .style(|theme: &Theme| {
+            let palette = theme.palette();
+            let luma =
+                palette.background.r * 0.299 + palette.background.g * 0.587 + palette.background.b * 0.114;
+            let track_bg = if luma > 0.5 {
+                iced::Color::from_rgb(
+                    0xF0 as f32 / 255.0,
+                    0xED as f32 / 255.0,
+                    0xE8 as f32 / 255.0,
+                )
+            } else {
+                iced::Color {
+                    r: (palette.background.r + 0.12).min(1.0),
+                    g: (palette.background.g + 0.12).min(1.0),
+                    b: (palette.background.b + 0.12).min(1.0),
+                    a: 1.0,
+                }
+            };
+            progress_bar::Style {
+                background: track_bg.into(),
+                bar: palette.primary.into(),
+                border: iced::border::Border {
+                    radius: 100.0.into(),
+                    ..iced::border::Border::default()
+                },
+            }
+        })
         .into()
 }
 
