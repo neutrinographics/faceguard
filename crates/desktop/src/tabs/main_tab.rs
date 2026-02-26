@@ -243,16 +243,32 @@ fn workflow_view<'a>(
         ProcessingState::Idle => {
             let blur_btn = primary_button::primary_button_fill(
                 move || {
-                    text("Blur All Faces")
-                        .size(scaled(15.0, fs))
-                        .color(iced::Color::WHITE)
-                        .font(iced::Font {
-                            weight: iced::font::Weight::Bold,
-                            ..iced::Font::DEFAULT
-                        })
-                        .align_x(iced::Alignment::Center)
-                        .width(Length::Fill)
-                        .into()
+                    let blur_icon = svg(svg::Handle::from_memory(
+                        include_bytes!("../../assets/blur.svg").as_slice(),
+                    ))
+                    .width(16)
+                    .height(16)
+                    .style(|_theme: &Theme, _status| svg::Style {
+                        color: Some(iced::Color::WHITE),
+                    });
+
+                    container(
+                        row![
+                            blur_icon,
+                            text("Blur All Faces")
+                                .size(scaled(15.0, fs))
+                                .color(iced::Color::WHITE)
+                                .font(iced::Font {
+                                    weight: iced::font::Weight::Bold,
+                                    ..iced::Font::DEFAULT
+                                }),
+                        ]
+                        .spacing(8)
+                        .align_y(iced::Alignment::Center),
+                    )
+                    .width(Length::Fill)
+                    .center_x(Length::Fill)
+                    .into()
                 },
                 Message::RunBlur,
                 blur_button_hovered,
@@ -314,16 +330,32 @@ fn workflow_view<'a>(
         ProcessingState::Previewed => {
             let blur_btn = primary_button::primary_button_fill(
                 move || {
-                    text("Blur Selected Faces")
-                        .size(scaled(15.0, fs))
-                        .color(iced::Color::WHITE)
-                        .font(iced::Font {
-                            weight: iced::font::Weight::Bold,
-                            ..iced::Font::DEFAULT
-                        })
-                        .align_x(iced::Alignment::Center)
-                        .width(Length::Fill)
-                        .into()
+                    let blur_icon = svg(svg::Handle::from_memory(
+                        include_bytes!("../../assets/blur.svg").as_slice(),
+                    ))
+                    .width(16)
+                    .height(16)
+                    .style(|_theme: &Theme, _status| svg::Style {
+                        color: Some(iced::Color::WHITE),
+                    });
+
+                    container(
+                        row![
+                            blur_icon,
+                            text("Blur Selected Faces")
+                                .size(scaled(15.0, fs))
+                                .color(iced::Color::WHITE)
+                                .font(iced::Font {
+                                    weight: iced::font::Weight::Bold,
+                                    ..iced::Font::DEFAULT
+                                }),
+                        ]
+                        .spacing(8)
+                        .align_y(iced::Alignment::Center),
+                    )
+                    .width(Length::Fill)
+                    .center_x(Length::Fill)
+                    .into()
                 },
                 Message::RunBlur,
                 blur_button_hovered,
