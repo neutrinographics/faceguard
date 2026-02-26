@@ -26,7 +26,10 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:claude.ai)",
       "WebFetch(domain:)",
-      "Bash(git stash:*)"
+      "Bash(git stash:*)",
+      "Bash(git checkout:*)",
+      "Bash(git:*)",
+      "Bash(pkg-config:*)"
     ]
   }
 }

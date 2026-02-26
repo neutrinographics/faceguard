@@ -188,6 +188,12 @@ pub fn view(fs: f32, theme: &Theme, website_hovered: bool) -> Element<'static, M
                 fs,
                 muted,
             ),
+            Space::new().height(4),
+            bullet_point(
+                "Metadata such as GPS location, camera details, and timestamps is removed from exported files",
+                fs,
+                muted,
+            ),
         ]
         .spacing(0),
         surface,
