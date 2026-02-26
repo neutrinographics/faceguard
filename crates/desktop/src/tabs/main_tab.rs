@@ -27,6 +27,8 @@ pub fn view<'a>(
     cancel_hovered: bool,
     rescan_hovered: bool,
     face_card_hovered: &std::collections::HashSet<u32>,
+    show_folder_hovered: bool,
+    blur_another_hovered: bool,
 ) -> Element<'a, Message> {
     let muted = muted_color(theme);
     let tertiary = tertiary_color(theme);
@@ -36,7 +38,7 @@ pub fn view<'a>(
     }
 
     if let ProcessingState::Complete = processing {
-        return complete_state(fs, muted, tertiary, output_path);
+        return complete_state(fs, muted, tertiary, output_path, theme, show_folder_hovered, blur_another_hovered);
     }
 
     if let ProcessingState::Error(ref e) = processing {
@@ -51,30 +53,84 @@ fn complete_state<'a>(
     _muted: iced::Color,
     tertiary: iced::Color,
     output_path: Option<&Path>,
+    theme: &Theme,
+    show_folder_hovered: bool,
+    blur_another_hovered: bool,
 ) -> Element<'a, Message> {
     let filename = output_path
         .and_then(|p| p.file_name())
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
 
+    let success_color = iced::Color::from_rgb(
+        0x2E as f32 / 255.0,
+        0x8B as f32 / 255.0,
+        0x57 as f32 / 255.0,
+    );
+    let success_bg = if is_dark_theme(theme) {
+        iced::Color::from_rgba(
+            0x2E as f32 / 255.0,
+            0x8B as f32 / 255.0,
+            0x57 as f32 / 255.0,
+            0.15,
+        )
+    } else {
+        iced::Color::from_rgb(
+            0xE8 as f32 / 255.0,
+            0xF5 as f32 / 255.0,
+            0xEE as f32 / 255.0,
+        )
+    };
+
+    let check_icon = container(
+        text("\u{2713}")
+            .size(scaled(28.0, fs))
+            .color(success_color)
+            .align_x(iced::Alignment::Center),
+    )
+    .width(64)
+    .height(64)
+    .center_x(64)
+    .center_y(64)
+    .style(move |_theme: &Theme| container::Style {
+        background: Some(success_bg.into()),
+        border: iced::border::Border {
+            radius: 32.0.into(),
+            ..iced::border::Border::default()
+        },
+        ..container::Style::default()
+    });
+
+    let show_btn = primary_button::primary_button_fill(
+        move || text("Show in Folder").size(scaled(15.0, fs)).font(iced::Font { weight: iced::font::Weight::Semibold, ..iced::Font::DEFAULT }).center().into(),
+        Message::ShowInFolder,
+        show_folder_hovered,
+        Message::ShowFolderHover,
+        [14, 24],
+    );
+
+    let another_btn = secondary_button::secondary_button_fill(
+        move || text("Blur Another File").size(scaled(14.0, fs)).font(iced::Font { weight: iced::font::Weight::Semibold, ..iced::Font::DEFAULT }).center().into(),
+        Message::StartOver,
+        blur_another_hovered,
+        Message::BlurAnotherHover,
+        [14, 20],
+    );
+
     centered(
         column![
-            text("All done!").size(scaled(20.0, fs)),
+            check_icon,
+            Space::new().height(20),
+            text("All done!").size(scaled(20.0, fs)).font(iced::Font { weight: iced::font::Weight::Semibold, ..iced::Font::DEFAULT }).center(),
             Space::new().height(6),
             text(format!("Saved as {filename}"))
                 .size(scaled(14.0, fs))
-                .color(tertiary),
+                .color(tertiary)
+                .center(),
             Space::new().height(28),
-            button(text("Show in Folder").size(scaled(15.0, fs)))
-                .on_press(Message::ShowInFolder)
-                .padding([14, 24])
-                .width(Length::Fill),
+            show_btn,
             Space::new().height(10),
-            button(text("Blur Another File").size(scaled(14.0, fs)))
-                .on_press(Message::StartOver)
-                .padding([14, 20])
-                .width(Length::Fill)
-                .style(button::secondary),
+            another_btn,
         ]
         .align_x(iced::Alignment::Center)
         .width(280)
@@ -419,5 +475,11 @@ fn centered(content: Element<'_, Message>) -> Element<'_, Message> {
         .center_x(Length::Fill)
         .center_y(Length::Fill)
         .into()
+}
+
+fn is_dark_theme(theme: &Theme) -> bool {
+    let p = theme.palette();
+    let luma = p.background.r * 0.299 + p.background.g * 0.587 + p.background.b * 0.114;
+    luma <= 0.5
 }
 

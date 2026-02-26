@@ -97,6 +97,8 @@ pub enum Message {
     CancelHover(bool),
     RescanHover(bool),
     FaceCardHover(u32, bool),
+    ShowFolderHover(bool),
+    BlurAnotherHover(bool),
 }
 
 pub struct App {
@@ -122,6 +124,8 @@ pub struct App {
     pub cancel_hovered: bool,
     pub rescan_hovered: bool,
     pub face_card_hovered: HashSet<u32>,
+    pub show_folder_hovered: bool,
+    pub blur_another_hovered: bool,
 }
 
 impl App {
@@ -150,6 +154,8 @@ impl App {
                 cancel_hovered: false,
                 rescan_hovered: false,
                 face_card_hovered: HashSet::new(),
+                show_folder_hovered: false,
+                blur_another_hovered: false,
             },
             Task::none(),
         )
@@ -269,6 +275,12 @@ impl App {
             Message::RescanHover(hovered) => {
                 self.rescan_hovered = hovered;
             }
+            Message::ShowFolderHover(hovered) => {
+                self.show_folder_hovered = hovered;
+            }
+            Message::BlurAnotherHover(hovered) => {
+                self.blur_another_hovered = hovered;
+            }
             Message::FaceCardHover(id, hovered) => {
                 if hovered {
                     self.face_card_hovered.insert(id);
@@ -335,6 +347,8 @@ impl App {
                 self.cancel_hovered,
                 self.rescan_hovered,
                 &self.face_card_hovered,
+                self.show_folder_hovered,
+                self.blur_another_hovered,
             ),
             Tab::Settings => tabs::settings_tab::view(&self.settings, self.gpu_context.is_some()),
             Tab::About => tabs::about_tab::view(fs, &current_theme),

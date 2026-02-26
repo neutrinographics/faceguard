@@ -2,13 +2,19 @@ use std::time::Duration;
 
 use iced::border::Border;
 use iced::widget::{button, container, mouse_area};
-use iced::{Color, Element, Length, Padding, Theme};
+use iced::{Color, Element, Length, Padding, Shadow, Theme, Vector};
 use iced_anim::transition::Easing;
 use iced_anim::AnimationBuilder;
 
 const HOVER_DARKEN: f32 = 0.05;
-const FLOAT_HEIGHT: f32 = 1.5;
+const FLOAT_HEIGHT: f32 = 1.0;
 const CORNER_RADIUS: f32 = 10.0;
+const SHADOW_BLUR_BASE: f32 = 10.0;
+const SHADOW_BLUR_HOVER: f32 = 15.0;
+const SHADOW_OFFSET_Y_BASE: f32 = 3.0;
+const SHADOW_OFFSET_Y_HOVER: f32 = 3.0;
+const SHADOW_ALPHA_BASE: f32 = 0.25;
+const SHADOW_ALPHA_HOVER: f32 = 0.35;
 const ANIMATION_DURATION: Duration = Duration::from_millis(200);
 
 pub fn primary_button<'a, Message: Clone + 'a>(
@@ -84,16 +90,19 @@ fn build_button<'a, Message: Clone + 'a>(
         });
 
     let rise = hover_amount * FLOAT_HEIGHT;
+    let shadow_pad = SHADOW_BLUR_HOVER + SHADOW_OFFSET_Y_HOVER;
     container(btn)
         .padding(Padding {
-            top: FLOAT_HEIGHT - rise,
-            bottom: rise,
-            ..Padding::ZERO
+            top: shadow_pad + FLOAT_HEIGHT - rise,
+            bottom: shadow_pad + rise,
+            left: shadow_pad,
+            right: shadow_pad,
         })
         .into()
 }
 
 fn styled(base: Color, hover_amount: f32) -> button::Style {
+    let t = hover_amount;
     button::Style {
         background: Some(darken(base, hover_amount).into()),
         text_color: Color::WHITE,
@@ -101,8 +110,22 @@ fn styled(base: Color, hover_amount: f32) -> button::Style {
             radius: CORNER_RADIUS.into(),
             ..Border::default()
         },
+        shadow: Shadow {
+            color: Color::from_rgba(
+                base.r,
+                base.g,
+                base.b,
+                lerp(SHADOW_ALPHA_BASE, SHADOW_ALPHA_HOVER, t),
+            ),
+            offset: Vector::new(0.0, lerp(SHADOW_OFFSET_Y_BASE, SHADOW_OFFSET_Y_HOVER, t)),
+            blur_radius: lerp(SHADOW_BLUR_BASE, SHADOW_BLUR_HOVER, t),
+        },
         ..button::Style::default()
     }
+}
+
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
 }
 
 fn darken(color: Color, amount: f32) -> Color {
