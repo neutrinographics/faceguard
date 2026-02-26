@@ -396,15 +396,28 @@ fn pill_button<'a>(
     )
     .on_press(on_press)
     .padding([6, 16])
-    .style(move |_theme: &Theme, _status| button::Style {
-        background: Some(bg.into()),
-        text_color,
-        border: iced::border::Border {
-            color: pill_border_color,
-            width: pill_border_width,
-            radius: 20.0.into(),
-        },
-        ..button::Style::default()
+    .style(move |_theme: &Theme, status| {
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        let bg = if !is_active && hovered {
+            Color { a: 0.08, ..border_color }
+        } else {
+            bg
+        };
+        let pill_border_color = if !is_active && hovered {
+            Color { a: 0.25, ..border_color }
+        } else {
+            pill_border_color
+        };
+        button::Style {
+            background: Some(bg.into()),
+            text_color,
+            border: iced::border::Border {
+                color: pill_border_color,
+                width: pill_border_width,
+                radius: 20.0.into(),
+            },
+            ..button::Style::default()
+        }
     })
     .into()
 }
