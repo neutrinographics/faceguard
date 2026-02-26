@@ -111,16 +111,16 @@ pub fn view<'a>(state: &FacesWellState, fs: f32, theme: &Theme, hovered: &std::c
     // Header row: title + count on left, group toggle on right
     let header = row![
         row![
-            text("Detected Faces").size(scaled(15.0, fs)),
+            text("Detected Faces").size(scaled(16.0, fs)),
             Space::new().width(10),
-            text(count_label).size(scaled(13.0, fs)).color(tertiary),
+            text(count_label).size(scaled(14.0, fs)).color(tertiary),
         ]
         .align_y(iced::Alignment::Center),
         Space::new().width(Length::Fill),
         checkbox(state.group_faces)
             .label("Group similar")
             .on_toggle(Message::GroupFacesToggled)
-            .text_size(scaled(13.0, fs)),
+            .text_size(scaled(14.0, fs)),
     ]
     .spacing(8)
     .align_y(iced::Alignment::Center);

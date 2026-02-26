@@ -21,7 +21,7 @@ pub fn view<'a>(
     let accent = theme.palette().primary;
 
     let restore_btn = secondary_button::secondary_button_small(
-        move || text("Restore Defaults").size(scaled(13.0, fs)).into(),
+        move || text("Restore Defaults").size(scaled(14.0, fs)).into(),
         Message::RestoreDefaults,
         restore_defaults_hovered,
         Message::RestoreDefaultsHover,
@@ -114,7 +114,7 @@ fn blur_section<'a>(
                 BlurShape::Ellipse => "Ellipse follows the natural shape of a face.",
                 BlurShape::Rect => "Rectangle covers a wider area.",
             })
-            .size(scaled(13.0, fs))
+            .size(scaled(14.0, fs))
             .color(tertiary),
         ]
         .spacing(0),
@@ -132,7 +132,7 @@ fn blur_section<'a>(
             .align_y(iced::Alignment::Center),
             Space::new().height(4),
             text("How heavily faces are blurred.")
-                .size(scaled(13.0, fs))
+                .size(scaled(14.0, fs))
                 .color(tertiary),
             Space::new().height(12),
             slider(
@@ -158,12 +158,12 @@ fn blur_section<'a>(
             .align_y(iced::Alignment::Center),
             Space::new().height(4),
             text("Higher quality produces larger files.")
-                .size(scaled(13.0, fs))
+                .size(scaled(14.0, fs))
                 .color(tertiary),
             Space::new().height(12),
             slider(0..=100, settings.quality, Message::QualityChanged).style(slider_style),
             Space::new().height(8),
-            text(backend_label).size(scaled(11.0, fs)).color(tertiary),
+            text(backend_label).size(scaled(12.0, fs)).color(tertiary),
         ]
         .spacing(0),
         surface,
@@ -205,7 +205,7 @@ fn detection_section<'a>(
             .align_y(iced::Alignment::Center),
             Space::new().height(4),
             text("How certain the detector must be that something is a face. Lower values catch more faces but may have false positives.")
-                .size(scaled(13.0, fs))
+                .size(scaled(14.0, fs))
                 .color(tertiary),
             Space::new().height(12),
             slider(10..=100, settings.confidence, Message::ConfidenceChanged).style(slider_style),
@@ -225,7 +225,7 @@ fn detection_section<'a>(
             .align_y(iced::Alignment::Center),
             Space::new().height(4),
             text("Scan ahead to blur faces before they fully enter the frame. A larger value helps with fast moving faces.")
-                .size(scaled(13.0, fs))
+                .size(scaled(14.0, fs))
                 .color(tertiary),
             Space::new().height(12),
             slider(0..=30, settings.lookahead, Message::LookaheadChanged)
@@ -281,7 +281,7 @@ fn appearance_section<'a>(
             checkbox(settings.high_contrast)
                 .label("High contrast")
                 .on_toggle(Message::HighContrastChanged)
-                .text_size(scaled(13.0, fs)),
+                .text_size(scaled(14.0, fs)),
         ]
         .spacing(0),
         surface,
@@ -347,7 +347,7 @@ fn sensitivity_label(confidence: u32) -> String {
 
 fn section_label<'a>(label: &str, fs: f32, color: Color) -> iced::widget::Text<'a> {
     text(label.to_string())
-        .size(scaled(11.0, fs))
+        .size(scaled(12.0, fs))
         .color(color)
         .font(iced::Font {
             weight: iced::font::Weight::Bold,
@@ -362,7 +362,7 @@ fn border_light_color(theme: &Theme) -> Color {
 
 fn setting_name<'a>(label: &str, fs: f32) -> iced::widget::Text<'a> {
     text(label.to_string())
-        .size(scaled(14.0, fs))
+        .size(scaled(15.0, fs))
         .font(iced::Font {
             weight: iced::font::Weight::Semibold,
             ..iced::Font::DEFAULT
@@ -387,7 +387,7 @@ fn pill_button<'a>(
 
     button(
         text(label)
-            .size(scaled(13.0, fs))
+            .size(scaled(14.0, fs))
             .color(text_color)
             .font(iced::Font {
                 weight: iced::font::Weight::Semibold,
@@ -426,7 +426,7 @@ fn value_badge<'a>(label: String, fs: f32, accent: Color) -> Element<'a, Message
     let accent_bg = Color { a: 0.12, ..accent };
     container(
         text(label)
-            .size(scaled(13.0, fs))
+            .size(scaled(14.0, fs))
             .color(accent)
             .font(iced::Font {
                 weight: iced::font::Weight::Semibold,

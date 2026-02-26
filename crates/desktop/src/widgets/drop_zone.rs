@@ -91,7 +91,7 @@ fn build_inner(
             row![
                 folder_icon,
                 text("Browse Files")
-                    .size(scaled(14.0, fs))
+                    .size(scaled(15.0, fs))
                     .color(Color::WHITE)
                     .font(iced::Font {
                         weight: iced::font::Weight::Bold,
@@ -112,20 +112,20 @@ fn build_inner(
         icon_circle,
         Space::new().height(16),
         text("Drop a file here to get started")
-            .size(scaled(17.0, fs))
+            .size(scaled(18.0, fs))
             .font(iced::Font {
                 weight: iced::font::Weight::Bold,
                 ..iced::Font::DEFAULT
             }),
         Space::new().height(6),
         text("or click to browse your computer")
-            .size(scaled(14.0, fs))
+            .size(scaled(15.0, fs))
             .color(tertiary),
         Space::new().height(20),
         browse_btn,
         Space::new().height(16),
         text("MP4, MOV, AVI, JPG, PNG")
-            .size(scaled(12.0, fs))
+            .size(scaled(13.0, fs))
             .color(tertiary),
     ]
     .align_x(iced::Alignment::Center)

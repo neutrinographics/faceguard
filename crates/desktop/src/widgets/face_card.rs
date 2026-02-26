@@ -97,7 +97,7 @@ fn build_card<'a>(
     if selected {
         let check: Element<'a, Message> = container(
             text("\u{2713}")
-                .size(scaled(11.0, fs))
+                .size(scaled(12.0, fs))
                 .color(Color::WHITE)
                 .align_x(iced::Alignment::Center),
         )
@@ -122,7 +122,7 @@ fn build_card<'a>(
     if let Some(badge_text) = badge {
         let count: Element<'a, Message> = container(
             text(badge_text.clone())
-                .size(scaled(11.0, fs))
+                .size(scaled(12.0, fs))
                 .color(Color::WHITE)
                 .font(iced::Font {
                     weight: iced::font::Weight::Semibold,

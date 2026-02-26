@@ -50,14 +50,14 @@ pub fn view(fs: f32, theme: &Theme, website_hovered: bool) -> Element<'static, M
     let header = column![
         logo_box,
         Space::new().height(16),
-        text("FaceGuard").size(scaled(26.0, fs)).font(semibold),
+        text("FaceGuard").size(scaled(28.0, fs)).font(semibold),
         Space::new().height(4),
         text(format!("Version {version}"))
-            .size(scaled(13.0, fs))
+            .size(scaled(14.0, fs))
             .color(tertiary),
         Space::new().height(4),
         text("Made by Neutrino Graphics LLC")
-            .size(scaled(14.0, fs))
+            .size(scaled(15.0, fs))
             .font(semibold)
             .color(muted),
     ]
@@ -68,14 +68,14 @@ pub fn view(fs: f32, theme: &Theme, website_hovered: bool) -> Element<'static, M
     let why_section = column![styled_card(
         column![
             text("Why we built this")
-                .size(scaled(14.0, fs))
+                .size(scaled(15.0, fs))
                 .font(semibold),
             Space::new().height(8),
             text(
                 "In many parts of the world, sharing photos and videos from meaningful \
                      work can put people at risk.",
             )
-            .size(scaled(13.0, fs))
+            .size(scaled(14.0, fs))
             .color(muted),
             Space::new().height(8),
             text(
@@ -83,14 +83,14 @@ pub fn view(fs: f32, theme: &Theme, website_hovered: bool) -> Element<'static, M
                      faces, backgrounds, and small details to expose someone\u{2019}s identity in \
                      ways you never intended.",
             )
-            .size(scaled(13.0, fs))
+            .size(scaled(14.0, fs))
             .color(muted),
             Space::new().height(8),
             text(
                 "We built this app to make protection simple. Actually, we built this for \
                      ourselves, and realized that it could help a lot of other people, too.",
             )
-            .size(scaled(13.0, fs))
+            .size(scaled(14.0, fs))
             .color(muted),
             Space::new().height(8),
             text(
@@ -98,7 +98,7 @@ pub fn view(fs: f32, theme: &Theme, website_hovered: bool) -> Element<'static, M
                      version you can share with confidence \u{2014} without spending hours editing \
                      or taking unnecessary risks.",
             )
-            .size(scaled(13.0, fs))
+            .size(scaled(14.0, fs))
             .color(muted),
         ]
         .spacing(0),
@@ -131,26 +131,26 @@ pub fn view(fs: f32, theme: &Theme, website_hovered: bool) -> Element<'static, M
                 "This app is designed for sensitive environments. Your content should \
                  stay in your control.",
             )
-            .size(scaled(13.0, fs))
+            .size(scaled(14.0, fs))
             .color(muted),
             Space::new().height(8),
             text("All processing happens locally on your device.")
-                .size(scaled(13.0, fs))
+                .size(scaled(15.0, fs))
                 .font(semibold)
                 .color(muted),
             text("Your photos and videos are never uploaded to a server.",)
-                .size(scaled(13.0, fs))
+                .size(scaled(14.0, fs))
                 .color(muted),
             Space::new().height(8),
             text(
                 "After a one-time download of the face detection library, the app works \
                  entirely offline.",
             )
-            .size(scaled(13.0, fs))
+            .size(scaled(14.0, fs))
             .color(muted),
             Space::new().height(8),
             text("No analytics. No tracking. No cloud processing.")
-                .size(scaled(13.0, fs))
+                .size(scaled(15.0, fs))
                 .font(semibold)
                 .color(muted),
         ]
@@ -162,7 +162,7 @@ pub fn view(fs: f32, theme: &Theme, website_hovered: bool) -> Element<'static, M
     let data_card = styled_card(
         column![
             text("How your data is handled")
-                .size(scaled(14.0, fs))
+                .size(scaled(15.0, fs))
                 .font(semibold),
             Space::new().height(8),
             bullet_point(
@@ -198,7 +198,7 @@ pub fn view(fs: f32, theme: &Theme, website_hovered: bool) -> Element<'static, M
     let important_card = styled_card(
         column![
             text("Blurring is permanent")
-                .size(scaled(14.0, fs))
+                .size(scaled(15.0, fs))
                 .font(semibold),
             Space::new().height(8),
             text(
@@ -206,13 +206,13 @@ pub fn view(fs: f32, theme: &Theme, website_hovered: bool) -> Element<'static, M
                  be recovered. There is no way to reverse the edit or restore hidden faces \
                  from the exported file.",
             )
-            .size(scaled(13.0, fs))
+            .size(scaled(14.0, fs))
             .color(muted),
             Space::new().height(8),
             text(
                 "If you may need the original media later, keep a separate copy before exporting.",
             )
-            .size(scaled(13.0, fs))
+            .size(scaled(14.0, fs))
             .color(muted),
         ]
         .spacing(0),
@@ -223,17 +223,17 @@ pub fn view(fs: f32, theme: &Theme, website_hovered: bool) -> Element<'static, M
     let safeguard_card = styled_card(
         column![
             text("Final safeguard")
-                .size(scaled(14.0, fs))
+                .size(scaled(15.0, fs))
                 .font(semibold),
             Space::new().height(8),
             text("This tool is designed to help reduce risk, not eliminate it entirely.",)
-                .size(scaled(13.0, fs))
+                .size(scaled(14.0, fs))
                 .color(muted),
             Space::new().height(8),
             text(
                 "Always review your final file before sharing, especially in sensitive situations.",
             )
-            .size(scaled(13.0, fs))
+            .size(scaled(14.0, fs))
             .color(muted),
         ]
         .spacing(0),
@@ -265,21 +265,21 @@ pub fn view(fs: f32, theme: &Theme, website_hovered: bool) -> Element<'static, M
                 "This app was built by a small software team that works closely with \
                  ministries and mission-driven organizations.",
             )
-            .size(scaled(13.0, fs))
+            .size(scaled(14.0, fs))
             .color(muted),
             Space::new().height(8),
             text(
                 "We understand the challenges of operating in sensitive environments \u{2014} \
                  balancing impact, communication, and security while trying to serve people well.",
             )
-            .size(scaled(13.0, fs))
+            .size(scaled(14.0, fs))
             .color(muted),
             Space::new().height(8),
             text(
                 "Most of our work focuses on building practical, custom tools that help \
                  teams operate more effectively in the field.",
             )
-            .size(scaled(13.0, fs))
+            .size(scaled(14.0, fs))
             .color(muted),
         ]
         .spacing(0),
@@ -290,7 +290,7 @@ pub fn view(fs: f32, theme: &Theme, website_hovered: bool) -> Element<'static, M
     let cta_card = container(
         column![
             text("If your organization is facing a challenge that doesn\u{2019}t have a simple off-the-shelf solution, we\u{2019}d be glad to hear about it.")
-                .size(scaled(14.0, fs))
+                .size(scaled(15.0, fs))
                 .color(muted)
                 .align_x(iced::Alignment::Center),
             Space::new().height(16),
@@ -346,7 +346,7 @@ fn website_button(fs: f32, hovered: bool) -> Element<'static, Message> {
 
             row![
                 text("Visit our website")
-                    .size(scaled(14.0, fs))
+                    .size(scaled(15.0, fs))
                     .font(iced::Font {
                         weight: iced::font::Weight::Semibold,
                         ..iced::Font::DEFAULT
@@ -366,7 +366,7 @@ fn website_button(fs: f32, hovered: bool) -> Element<'static, Message> {
 
 fn section_label<'a>(label: &str, fs: f32, color: Color) -> iced::widget::Text<'a> {
     text(label.to_string())
-        .size(scaled(11.0, fs))
+        .size(scaled(12.0, fs))
         .color(color)
         .font(iced::Font {
             weight: iced::font::Weight::Bold,
@@ -376,9 +376,9 @@ fn section_label<'a>(label: &str, fs: f32, color: Color) -> iced::widget::Text<'
 
 fn bullet_point<'a>(content: &str, fs: f32, color: Color) -> Element<'a, Message> {
     row![
-        text("\u{2022} ").size(scaled(13.0, fs)).color(color),
+        text("\u{2022} ").size(scaled(14.0, fs)).color(color),
         text(content.to_string())
-            .size(scaled(13.0, fs))
+            .size(scaled(14.0, fs))
             .color(color),
     ]
     .into()

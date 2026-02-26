@@ -26,7 +26,7 @@ pub fn file_row<'a>(
     let display_text: Element<'a, Message> = if let Some(name) = path.and_then(|p| p.file_name())
     {
         text(name.to_string_lossy().to_string())
-            .size(scaled(15.0, fs))
+            .size(scaled(16.0, fs))
             .font(iced::Font {
                 weight: iced::font::Weight::Medium,
                 ..iced::Font::DEFAULT
@@ -34,13 +34,13 @@ pub fn file_row<'a>(
             .into()
     } else {
         text("No file selected")
-            .size(scaled(15.0, fs))
+            .size(scaled(16.0, fs))
             .color(tertiary)
             .into()
     };
 
     let btn = secondary_button::secondary_button_small(
-        move || text("Change").size(scaled(13.0, fs)).into(),
+        move || text("Change").size(scaled(14.0, fs)).into(),
         on_browse,
         hovered,
         on_hover,
@@ -48,7 +48,7 @@ pub fn file_row<'a>(
     );
 
     let label_text = text(label.to_uppercase())
-        .size(scaled(11.0, fs))
+        .size(scaled(12.0, fs))
         .font(iced::Font {
             weight: iced::font::Weight::Semibold,
             ..iced::Font::DEFAULT

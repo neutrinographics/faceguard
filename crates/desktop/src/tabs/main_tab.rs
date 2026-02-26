@@ -131,7 +131,7 @@ fn complete_state<'a>(
                 row![
                     folder_icon,
                     text("Show in Folder")
-                        .size(scaled(15.0, fs))
+                        .size(scaled(16.0, fs))
                         .font(iced::Font {
                             weight: iced::font::Weight::Semibold,
                             ..iced::Font::DEFAULT
@@ -153,7 +153,7 @@ fn complete_state<'a>(
     let another_btn = secondary_button::secondary_button_fill(
         move || {
             text("Blur Another File")
-                .size(scaled(15.0, fs))
+                .size(scaled(16.0, fs))
                 .font(iced::Font {
                     weight: iced::font::Weight::Semibold,
                     ..iced::Font::DEFAULT
@@ -173,7 +173,7 @@ fn complete_state<'a>(
             check_icon,
             Space::new().height(20),
             text("All done!")
-                .size(scaled(20.0, fs))
+                .size(scaled(22.0, fs))
                 .font(iced::Font {
                     weight: iced::font::Weight::Semibold,
                     ..iced::Font::DEFAULT
@@ -181,7 +181,7 @@ fn complete_state<'a>(
                 .center(),
             Space::new().height(6),
             text(format!("Saved as {filename}"))
-                .size(scaled(14.0, fs))
+                .size(scaled(15.0, fs))
                 .color(tertiary)
                 .center(),
             Space::new().height(28),
@@ -203,18 +203,18 @@ fn error_state<'a>(
 ) -> Element<'a, Message> {
     centered(
         column![
-            text("Something went wrong").size(scaled(18.0, fs)),
+            text("Something went wrong").size(scaled(19.0, fs)),
             Space::new().height(8),
             text(error.to_owned())
-                .size(scaled(14.0, fs))
+                .size(scaled(15.0, fs))
                 .color(tertiary),
             Space::new().height(20),
-            button(text("Try Again").size(scaled(14.0, fs)))
+            button(text("Try Again").size(scaled(15.0, fs)))
                 .on_press(Message::RunBlur)
                 .padding([14, 24])
                 .width(Length::Fill),
             Space::new().height(10),
-            button(text("Start Over").size(scaled(14.0, fs)))
+            button(text("Start Over").size(scaled(15.0, fs)))
                 .on_press(Message::StartOver)
                 .padding([14, 20])
                 .width(Length::Fill)
@@ -294,7 +294,7 @@ fn workflow_view<'a>(
                         row![
                             blur_icon,
                             text("Blur All Faces")
-                                .size(scaled(15.0, fs))
+                                .size(scaled(16.0, fs))
                                 .color(iced::Color::WHITE)
                                 .font(iced::Font {
                                     weight: iced::font::Weight::Bold,
@@ -317,7 +317,7 @@ fn workflow_view<'a>(
                 secondary_button::secondary_button_fill(
                     move || {
                         text("Choose Specific Faces\u{2026}")
-                            .size(scaled(14.0, fs))
+                            .size(scaled(15.0, fs))
                             .font(iced::Font {
                                 weight: iced::font::Weight::Bold,
                                 ..iced::Font::DEFAULT
@@ -390,7 +390,7 @@ fn workflow_view<'a>(
                         row![
                             blur_icon,
                             text("Blur Selected Faces")
-                                .size(scaled(15.0, fs))
+                                .size(scaled(16.0, fs))
                                 .color(iced::Color::WHITE)
                                 .font(iced::Font {
                                     weight: iced::font::Weight::Bold,
@@ -416,7 +416,7 @@ fn workflow_view<'a>(
                     row![
                         blur_btn,
                         secondary_button::secondary_button(
-                            move || text("Re-scan").size(scaled(14.0, fs)).into(),
+                            move || text("Re-scan").size(scaled(15.0, fs)).into(),
                             Message::RunPreview,
                             rescan_hovered,
                             Message::RescanHover,
@@ -453,7 +453,7 @@ fn progress_with_cancel<'a>(
     cancel_hovered: bool,
 ) -> Element<'a, Message> {
     let mut col = column![text(status.to_owned())
-        .size(scaled(15.0, fs))
+        .size(scaled(16.0, fs))
         .color(tertiary)]
     .spacing(8)
     .align_x(iced::Alignment::Center)
@@ -465,7 +465,7 @@ fn progress_with_cancel<'a>(
 
     col = col.push(Space::new().height(16));
     col = col.push(secondary_button::secondary_button_small(
-        move || text("Cancel").size(scaled(13.0, fs)).into(),
+        move || text("Cancel").size(scaled(14.0, fs)).into(),
         Message::CancelWork,
         cancel_hovered,
         Message::CancelHover,
@@ -488,7 +488,7 @@ fn progress_with_cancel_detail<'a>(
     progress: Option<f32>,
     cancel_hovered: bool,
 ) -> Element<'a, Message> {
-    let mut col = column![text(status.to_owned()).size(scaled(15.0, fs))]
+    let mut col = column![text(status.to_owned()).size(scaled(16.0, fs))]
         .spacing(8)
         .align_x(iced::Alignment::Center)
         .width(Length::Fill);
@@ -499,12 +499,12 @@ fn progress_with_cancel_detail<'a>(
 
     col = col.push(
         text(detail.to_owned())
-            .size(scaled(13.0, fs))
+            .size(scaled(14.0, fs))
             .color(tertiary),
     );
     col = col.push(Space::new().height(16));
     col = col.push(secondary_button::secondary_button_small(
-        move || text("Cancel").size(scaled(13.0, fs)).into(),
+        move || text("Cancel").size(scaled(14.0, fs)).into(),
         Message::CancelWork,
         cancel_hovered,
         Message::CancelHover,

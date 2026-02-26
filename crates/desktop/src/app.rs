@@ -646,7 +646,7 @@ fn tab_button<'a>(
 
     let tab_content: Element<'_, Message> = AnimationBuilder::new(target_color, move |color| {
         let label = text(tab.label())
-            .size(scaled(14.0, fs))
+            .size(scaled(15.0, fs))
             .color(color)
             .font(iced::Font {
                 weight: iced::font::Weight::Semibold,
