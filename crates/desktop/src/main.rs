@@ -11,7 +11,7 @@ fn main() -> iced::Result {
     env_logger::init();
 
     iced::application(App::new, App::update, App::view)
-        .title("Video Blur \u{2014} Neutrino Graphics")
+        .title("FaceGuard \u{2014} Neutrino Graphics")
         .theme(App::theme)
         .subscription(App::subscription)
         .window(iced::window::Settings {

@@ -50,7 +50,7 @@ pub fn view(fs: f32, theme: &Theme, website_hovered: bool) -> Element<'static, M
     let header = column![
         logo_box,
         Space::new().height(16),
-        text("Video Blur").size(scaled(26.0, fs)).font(semibold),
+        text("FaceGuard").size(scaled(26.0, fs)).font(semibold),
         Space::new().height(4),
         text(format!("Version {version}"))
             .size(scaled(13.0, fs))

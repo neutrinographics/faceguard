@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build a macOS .app bundle for Video Blur.
+# Build a macOS .app bundle for FaceGuard.
 # Usage: ./build_app.sh [--release]
 #
 # Builds with static FFmpeg linking (no dylib bundling needed).
@@ -8,7 +8,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORKSPACE_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-APP_NAME="Video Blur"
+APP_NAME="FaceGuard"
 BUNDLE_DIR="$WORKSPACE_DIR/target/bundle"
 APP_DIR="$BUNDLE_DIR/$APP_NAME.app"
 FRAMEWORKS_DIR="$APP_DIR/Contents/Frameworks"

@@ -59,20 +59,20 @@ pub fn resolve(
 
 /// Platform-specific model cache directory.
 ///
-/// - macOS: `~/Library/Application Support/Video Blur/models/`
-/// - Linux: `$XDG_CACHE_HOME/Video Blur/models/` or `~/.cache/Video Blur/models/`
-/// - Windows: `%LOCALAPPDATA%/Video Blur/models/`
+/// - macOS: `~/Library/Application Support/FaceGuard/models/`
+/// - Linux: `$XDG_CACHE_HOME/FaceGuard/models/` or `~/.cache/FaceGuard/models/`
+/// - Windows: `%LOCALAPPDATA%/FaceGuard/models/`
 pub fn model_cache_dir() -> Result<PathBuf, ModelResolveError> {
     #[cfg(target_os = "macos")]
     {
         dirs::data_dir()
-            .map(|d| d.join("Video Blur").join("models"))
+            .map(|d| d.join("FaceGuard").join("models"))
             .ok_or(ModelResolveError::NoCacheDir)
     }
     #[cfg(not(target_os = "macos"))]
     {
         dirs::cache_dir()
-            .map(|d| d.join("Video Blur").join("models"))
+            .map(|d| d.join("FaceGuard").join("models"))
             .ok_or(ModelResolveError::NoCacheDir)
     }
 }
@@ -200,7 +200,7 @@ mod tests {
         let dir = model_cache_dir();
         assert!(dir.is_ok());
         let path = dir.unwrap();
-        assert!(path.to_string_lossy().contains("Video Blur"));
+        assert!(path.to_string_lossy().contains("FaceGuard"));
         assert!(path.to_string_lossy().contains("models"));
     }
 

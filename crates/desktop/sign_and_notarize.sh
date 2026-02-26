@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Sign, package, and notarize the Video Blur macOS app.
+# Sign, package, and notarize the FaceGuard macOS app.
 #
 # Prerequisites:
 #   1. Run build_app.sh --release first to create the .app bundle.
@@ -16,9 +16,9 @@ set -euo pipefail
 #   ./sign_and_notarize.sh --no-notarize  # sign + DMG only (for local testing)
 
 # --- Configuration ---
-APP_NAME="Video Blur"
+APP_NAME="FaceGuard"
 SIGNING_IDENTITY="Developer ID Application: Neutrino Graphics LLC (S79EWNF9K2)"
-BUNDLE_ID="com.da1nerd.videoblur"
+BUNDLE_ID="com.da1nerd.faceguard"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORKSPACE_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -90,7 +90,7 @@ hdiutil attach "$DMG_RW" -mountpoint "$MOUNT_DIR" -noverify
 # Create a Finder alias to /Applications (aliases show the target's icon)
 osascript <<'ALIAS_SCRIPT'
 tell application "Finder"
-    make new alias file at POSIX file "/Volumes/Video Blur" to POSIX file "/Applications" with properties {name:"Applications"}
+    make new alias file at POSIX file "/Volumes/FaceGuard" to POSIX file "/Applications" with properties {name:"Applications"}
 end tell
 ALIAS_SCRIPT
 

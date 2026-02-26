@@ -19,7 +19,7 @@ pub fn resolve_theme(appearance: Appearance, high_contrast: bool) -> Theme {
         (false, true) => high_contrast_light_palette(),
     };
 
-    Theme::custom("Video Blur", palette)
+    Theme::custom("FaceGuard", palette)
 }
 
 /// Return a muted text color (secondary) appropriate for the current theme.

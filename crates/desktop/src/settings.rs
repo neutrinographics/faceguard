@@ -86,7 +86,7 @@ impl Default for Settings {
 
 impl Settings {
     fn config_path() -> Option<PathBuf> {
-        dirs::config_dir().map(|d| d.join("Video Blur").join("settings.json"))
+        dirs::config_dir().map(|d| d.join("FaceGuard").join("settings.json"))
     }
 
     pub fn load() -> Self {
