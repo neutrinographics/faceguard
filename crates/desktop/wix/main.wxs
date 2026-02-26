@@ -1,0 +1,79 @@
+<?xml version='1.0' encoding='windows-1252'?>
+<!--
+  Installer for FaceGuard desktop application.
+  Built with cargo-wix: cargo wix
+-->
+<Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
+    <Product
+        Id='*'
+        Name='FaceGuard'
+        UpgradeCode='B9F34C71-8E56-4A9D-9C02-7D6E5F8A1B3E'
+        Manufacturer='Neutrino Graphics'
+        Language='1033'
+        Codepage='1252'
+        Version='$(var.Version)'>
+
+        <Package Id='*'
+            Keywords='Installer'
+            Description='FaceGuard - Face blurring for videos and images'
+            Manufacturer='Neutrino Graphics'
+            InstallerVersion='450'
+            Languages='1033'
+            Compressed='yes'
+            InstallScope='perMachine'
+            SummaryCodepage='1252'/>
+
+        <MajorUpgrade
+            Schedule='afterInstallInitialize'
+            DowngradeErrorMessage='A newer version of FaceGuard is already installed.'/>
+
+        <MediaTemplate EmbedCab='yes'/>
+
+        <Directory Id='TARGETDIR' Name='SourceDir'>
+            <Directory Id='ProgramFilesFolder' Name='PFiles'>
+                <Directory Id='APPLICATIONFOLDER' Name='FaceGuard'>
+                    <Component Id='binary0' Guid='*'>
+                        <File Id='exe0'
+                            Name='faceguard-desktop.exe'
+                            DiskId='1'
+                            Source='$(var.CargoTargetBinDir)\faceguard-desktop.exe'
+                            KeyPath='yes'/>
+                    </Component>
+                </Directory>
+            </Directory>
+            <Directory Id='ProgramMenuFolder'>
+                <Directory Id='ApplicationProgramsFolder' Name='FaceGuard'>
+                    <Component Id='ApplicationShortcut' Guid='*'>
+                        <Shortcut Id='ApplicationStartMenuShortcut'
+                            Name='FaceGuard'
+                            Description='Face blurring for videos and images'
+                            Target='[#exe0]'
+                            WorkingDirectory='APPLICATIONFOLDER'
+                            Icon='ProductICO'/>
+                        <RemoveFolder Id='CleanUpShortCut' Directory='ApplicationProgramsFolder' On='uninstall'/>
+                        <RegistryValue Root='HKCU' Key='Software\Neutrino Graphics\FaceGuard' Name='installed' Type='integer' Value='1' KeyPath='yes'/>
+                    </Component>
+                </Directory>
+            </Directory>
+        </Directory>
+
+        <Feature Id='Binaries' Title='Application' Description='Installs the FaceGuard application.' Level='1' ConfigurableDirectory='APPLICATIONFOLDER' AllowAdvertise='no' Display='expand'>
+            <ComponentRef Id='binary0'/>
+            <ComponentRef Id='ApplicationShortcut'/>
+        </Feature>
+
+        <Icon Id='ProductICO' SourceFile='assets\icon.ico'/>
+        <Property Id='ARPPRODUCTICON' Value='ProductICO'/>
+
+        <SetProperty Id='ARPINSTALLLOCATION' Value='[APPLICATIONFOLDER]' After='CostFinalize'/>
+
+        <UI>
+            <UIRef Id='WixUI_InstallDir'/>
+            <Publish Dialog='WelcomeDlg' Control='Next' Event='NewDialog' Value='InstallDirDlg' Order='2'>1</Publish>
+            <Publish Dialog='InstallDirDlg' Control='Back' Event='NewDialog' Value='WelcomeDlg' Order='2'>1</Publish>
+        </UI>
+        <Property Id='WIXUI_INSTALLDIR' Value='APPLICATIONFOLDER'/>
+
+        <WixVariable Id='WixUILicenseRtf' Value='wix\License.rtf'/>
+    </Product>
+</Wix>
