@@ -28,7 +28,9 @@ jobs:
 
       - name: Install FFmpeg (macOS)
         if: runner.os == 'macOS'
-        run: brew install ffmpeg pkg-config
+        run: |
+          brew install ffmpeg pkg-config
+          echo "BINDGEN_EXTRA_CLANG_ARGS=$(pkg-config --cflags libavcodec libavformat libavutil libswscale)" >> $GITHUB_ENV
 
       - name: Install FFmpeg (Windows)
         if: runner.os == 'Windows'
