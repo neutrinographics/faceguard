@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use iced::widget::{button, container, image, mouse_area, row, stack, text, Space};
-use iced::{Color, Element, Length, Theme};
+use iced::{Color, Element, Length, Shadow, Theme, Vector};
 use iced_anim::transition::Easing;
 use iced_anim::AnimationBuilder;
 
@@ -13,6 +13,9 @@ const BORDER_WIDTH: f32 = 2.5;
 const BADGE_RADIUS: f32 = 10.0;
 const CHECK_SIZE: f32 = 20.0;
 const SCALE_GROW: f32 = 2.0;
+const SHADOW_BLUR: f32 = 10.0;
+const SHADOW_OFFSET_Y: f32 = 2.0;
+const SHADOW_ALPHA: f32 = 0.15;
 const ANIMATION_DURATION: Duration = Duration::from_millis(200);
 
 /// The outer size each card occupies in the grid (fixed, never changes with hover).
@@ -178,6 +181,11 @@ fn build_card<'a>(
                 color: border_color,
                 width: BORDER_WIDTH,
                 radius: CORNER_RADIUS.into(),
+            },
+            shadow: Shadow {
+                color: Color::from_rgba(0.0, 0.0, 0.0, SHADOW_ALPHA * hover_amount),
+                offset: Vector::new(0.0, SHADOW_OFFSET_Y * hover_amount),
+                blur_radius: SHADOW_BLUR * hover_amount,
             },
             ..container::Style::default()
         })
