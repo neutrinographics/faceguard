@@ -248,6 +248,7 @@ impl App {
             }
             Message::PollSystemTheme => {}
             Message::FileDropped(path) => {
+                self.drop_zone_hovered = false;
                 if has_supported_extension(&path) {
                     return self.update(Message::InputSelected(Some(path)));
                 }
@@ -394,10 +395,17 @@ impl App {
         }
 
         subs.push(iced::event::listen_with(|event, _status, _id| {
-            if let iced::Event::Window(iced::window::Event::FileDropped(path)) = event {
-                Some(Message::FileDropped(path))
-            } else {
-                None
+            match event {
+                iced::Event::Window(iced::window::Event::FileDropped(path)) => {
+                    Some(Message::FileDropped(path))
+                }
+                iced::Event::Window(iced::window::Event::FileHovered(_)) => {
+                    Some(Message::DropZoneHover(true))
+                }
+                iced::Event::Window(iced::window::Event::FilesHoveredLeft) => {
+                    Some(Message::DropZoneHover(false))
+                }
+                _ => None,
             }
         }));
 
