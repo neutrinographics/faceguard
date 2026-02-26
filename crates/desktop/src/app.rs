@@ -100,6 +100,7 @@ pub enum Message {
     ShowFolderHover(bool),
     BlurAnotherHover(bool),
     RestoreDefaultsHover(bool),
+    WebsiteHover(bool),
 }
 
 pub struct App {
@@ -128,6 +129,7 @@ pub struct App {
     pub show_folder_hovered: bool,
     pub blur_another_hovered: bool,
     pub restore_defaults_hovered: bool,
+    pub website_hovered: bool,
 }
 
 impl App {
@@ -159,6 +161,7 @@ impl App {
                 show_folder_hovered: false,
                 blur_another_hovered: false,
                 restore_defaults_hovered: false,
+                website_hovered: false,
             },
             Task::none(),
         )
@@ -287,6 +290,9 @@ impl App {
             Message::RestoreDefaultsHover(hovered) => {
                 self.restore_defaults_hovered = hovered;
             }
+            Message::WebsiteHover(hovered) => {
+                self.website_hovered = hovered;
+            }
             Message::FaceCardHover(id, hovered) => {
                 if hovered {
                     self.face_card_hovered.insert(id);
@@ -357,7 +363,7 @@ impl App {
                 self.blur_another_hovered,
             ),
             Tab::Settings => tabs::settings_tab::view(&self.settings, self.gpu_context.is_some(), self.restore_defaults_hovered),
-            Tab::About => tabs::about_tab::view(fs, &current_theme),
+            Tab::About => tabs::about_tab::view(fs, &current_theme, self.website_hovered),
         };
 
         let padded_content = container(content).padding(iced::Padding { top: 24.0, right: 24.0, bottom: 24.0, left: 24.0 });
