@@ -102,7 +102,7 @@ fn complete_state<'a>(
     });
 
     let show_btn = primary_button::primary_button_fill(
-        move || text("Show in Folder").size(scaled(15.0, fs)).font(iced::Font { weight: iced::font::Weight::Semibold, ..iced::Font::DEFAULT }).center().into(),
+        move || text("Show in Folder").size(scaled(15.0, fs)).font(iced::Font { weight: iced::font::Weight::Semibold, ..iced::Font::DEFAULT }).width(Length::Fill).center().into(),
         Message::ShowInFolder,
         show_folder_hovered,
         Message::ShowFolderHover,
@@ -110,7 +110,7 @@ fn complete_state<'a>(
     );
 
     let another_btn = secondary_button::secondary_button_fill(
-        move || text("Blur Another File").size(scaled(15.0, fs)).font(iced::Font { weight: iced::font::Weight::Semibold, ..iced::Font::DEFAULT }).center().into(),
+        move || text("Blur Another File").size(scaled(15.0, fs)).font(iced::Font { weight: iced::font::Weight::Semibold, ..iced::Font::DEFAULT }).width(Length::Fill).center().into(),
         Message::StartOver,
         blur_another_hovered,
         Message::BlurAnotherHover,
