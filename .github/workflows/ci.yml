@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -55,3 +56,97 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Check formatting
         run: cargo fmt --check
+
+  build-release:
+    needs: test
+    if: github.event_name == 'workflow_dispatch'
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: faceguard-desktop
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: faceguard-desktop.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install build deps (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm pkg-config clang
+
+      - name: Install build deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install nasm pkg-config x264
+
+      - name: Install build deps (Windows)
+        if: runner.os == 'Windows'
+        run: choco install nasm
+
+      - name: Setup MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install FFmpeg dev libs (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-win64-lgpl-shared-7.1.zip"
+          Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath C:\ffmpeg-dev
+          $ffmpegDir = (Get-ChildItem C:\ffmpeg-dev -Directory | Select-Object -First 1).FullName
+          echo "FFMPEG_DIR=$ffmpegDir" >> $env:GITHUB_ENV
+          echo "INCLUDE=$ffmpegDir\include;$env:INCLUDE" >> $env:GITHUB_ENV
+          echo "$ffmpegDir\bin" | Out-File -Append $env:GITHUB_PATH
+
+      - name: Build release (static FFmpeg)
+        if: runner.os != 'Windows'
+        run: cargo build --release --target ${{ matrix.target }} -p faceguard-desktop --features static-ffmpeg
+
+      - name: Build release (shared FFmpeg)
+        if: runner.os == 'Windows'
+        run: cargo build --release --target ${{ matrix.target }} -p faceguard-desktop
+
+      - name: Create macOS app bundle
+        if: runner.os == 'macOS' && matrix.target == 'aarch64-apple-darwin'
+        run: crates/desktop/build_app.sh --release
+
+      - name: Copy FFmpeg DLLs next to binary (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          Copy-Item "$env:FFMPEG_DIR\bin\*.dll" "target\${{ matrix.target }}\release\"
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: faceguard-desktop-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/${{ matrix.artifact }}
+
+      - name: Upload macOS app bundle
+        if: runner.os == 'macOS' && matrix.target == 'aarch64-apple-darwin'
+        uses: actions/upload-artifact@v4
+        with:
+          name: FaceGuard-macOS-app
+          path: target/bundle/FaceGuard.app
+
+      - name: Install cargo-wix (Windows)
+        if: runner.os == 'Windows'
+        run: cargo install cargo-wix
+
+      - name: Build MSI installer (Windows)
+        if: runner.os == 'Windows'
+        run: cargo wix -p faceguard-desktop --nocapture
+
+      - name: Upload MSI installer
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: FaceGuard-Windows-msi
+          path: target/wix/*.msi
