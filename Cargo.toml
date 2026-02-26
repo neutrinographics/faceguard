@@ -28,7 +28,6 @@ log = "0.4"
 image = "0.25"
 ffmpeg-next = "7"
 crossbeam-channel = "0.5"
-ort = { version = "2.0.0-rc.11", features = ["ndarray", "coreml"] }
 clap = { version = "4", features = ["derive"] }
 env_logger = "0.11"
 iced = { version = "0.14", features = ["image", "tokio", "canvas", "advanced", "svg"] }

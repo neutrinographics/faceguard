@@ -1,6 +1,7 @@
 pub mod bytetrack_tracker;
 pub mod cached_face_detector;
 pub mod embedding_face_grouper;
+pub mod execution_provider;
 pub mod histogram_face_grouper;
 pub mod math;
 pub mod model_resolver;

@@ -79,9 +79,7 @@ impl OnnxYoloDetector {
             .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)?
             .with_inter_threads(1)?
             .with_intra_threads(intra_threads)?
-            .with_execution_providers([
-                ort::execution_providers::CoreMLExecutionProvider::default().build(),
-            ])?
+            .with_execution_providers(super::execution_provider::preferred_execution_providers())?
             .commit_from_file(model_path)?;
         Ok(session)
     }
