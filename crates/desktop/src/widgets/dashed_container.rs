@@ -115,9 +115,11 @@ impl<Message> Widget<Message, Theme, Renderer> for DashedContainer<'_, Message> 
             Length::Shrink,
             self.padding,
             |limits| {
-                self.content
-                    .as_widget_mut()
-                    .layout(&mut tree.children[0], renderer, &limits.loose())
+                self.content.as_widget_mut().layout(
+                    &mut tree.children[0],
+                    renderer,
+                    &limits.loose(),
+                )
             },
             |content, size| {
                 content.align(
@@ -239,8 +241,7 @@ impl<Message> Widget<Message, Theme, Renderer> for DashedContainer<'_, Message> 
                 bounds.height - s.border_width,
             );
 
-            let border_path =
-                Path::rounded_rectangle(top_left, rect_size, s.corner_radius.into());
+            let border_path = Path::rounded_rectangle(top_left, rect_size, s.corner_radius.into());
             let dash_pattern = [s.dash_length, s.gap_length];
             frame.stroke(
                 &border_path,
@@ -258,12 +259,9 @@ impl<Message> Widget<Message, Theme, Renderer> for DashedContainer<'_, Message> 
 
             let geom = frame.into_geometry();
 
-            renderer.with_translation(
-                iced::Vector::new(bounds.x, bounds.y),
-                |renderer| {
-                    geometry::Renderer::draw_geometry(renderer, geom);
-                },
-            );
+            renderer.with_translation(iced::Vector::new(bounds.x, bounds.y), |renderer| {
+                geometry::Renderer::draw_geometry(renderer, geom);
+            });
         }
     }
 }

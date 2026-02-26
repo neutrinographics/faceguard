@@ -12,18 +12,30 @@ const MIN_WIDTH_RATIO: f64 = 0.8;
 /// Bounding box as (x1, y1, x2, y2).
 pub type BBox = (f64, f64, f64, f64);
 
+/// Default center offset: no shift.
+pub const DEFAULT_CENTER_OFFSET: f64 = 0.0;
+
 /// Converts detection boxes + optional landmarks into blur regions.
 ///
 /// Handles profile-aware sizing, center blending, padding, and
 /// minimum width constraints.
 pub struct FaceRegionBuilder {
     padding: f64,
+    center_offset: f64,
     smoother: Option<Box<dyn RegionSmootherInterface>>,
 }
 
 impl FaceRegionBuilder {
-    pub fn new(padding: f64, smoother: Option<Box<dyn RegionSmootherInterface>>) -> Self {
-        Self { padding, smoother }
+    pub fn new(
+        padding: f64,
+        center_offset: f64,
+        smoother: Option<Box<dyn RegionSmootherInterface>>,
+    ) -> Self {
+        Self {
+            padding,
+            center_offset,
+            smoother,
+        }
     }
 
     pub fn build(
@@ -39,8 +51,8 @@ impl FaceRegionBuilder {
             _ => 0.0,
         };
 
-        let (cx, cy) = self.compute_center(bbox, landmarks, profile_ratio);
         let (half_w, half_h) = self.compute_half_size(bbox, profile_ratio);
+        let (cx, cy) = self.compute_center(bbox, landmarks, profile_ratio, half_w);
 
         let mut params: SmoothParams = [cx, cy, half_w, half_h];
         if let Some(ref mut smoother) = self.smoother {
@@ -55,6 +67,7 @@ impl FaceRegionBuilder {
         bbox: BBox,
         landmarks: Option<&FaceLandmarks>,
         profile_ratio: f64,
+        half_w: f64,
     ) -> (f64, f64) {
         let box_cx = (bbox.0 + bbox.2) / 2.0;
         let box_cy = (bbox.1 + bbox.3) / 2.0;
@@ -62,8 +75,14 @@ impl FaceRegionBuilder {
         match landmarks {
             Some(lm) if lm.has_visible() => {
                 let (face_cx, face_cy) = lm.center().unwrap_or((box_cx, box_cy));
-                let cx = face_cx + (box_cx - face_cx) * profile_ratio;
+                let mut cx = face_cx + (box_cx - face_cx) * profile_ratio;
                 let cy = face_cy + (box_cy - face_cy) * profile_ratio;
+
+                if self.center_offset != 0.0 {
+                    let direction = lm.back_of_head_direction();
+                    cx += self.center_offset * half_w * direction;
+                }
+
                 (cx, cy)
             }
             _ => (box_cx, box_cy),
@@ -125,7 +144,7 @@ mod tests {
     const PADDING: f64 = 0.4;
 
     fn builder() -> FaceRegionBuilder {
-        FaceRegionBuilder::new(PADDING, None)
+        FaceRegionBuilder::new(PADDING, 0.0, None)
     }
 
     fn frontal_box() -> BBox {
@@ -340,5 +359,128 @@ mod tests {
         assert!(r.full_height.is_some());
         assert!(r.unclamped_x.is_some());
         assert!(r.unclamped_y.is_some());
+    }
+
+    // ── Center offset ─────────────────────────────────────────────
+
+    #[test]
+    fn test_center_offset_zero_no_shift() {
+        let mut b = FaceRegionBuilder::new(PADDING, 0.0, None);
+        let lm = frontal_landmarks();
+        let r = b.build(frontal_box(), FRAME_W, FRAME_H, Some(&lm), None);
+        let center_x = r.x as f64 + r.width as f64 / 2.0;
+        assert_relative_eq!(center_x, 500.0, epsilon = 5.0);
+    }
+
+    #[test]
+    fn test_center_offset_shifts_left_profile_rightward() {
+        // Left profile: nose is left of eye midpoint → back of head is right
+        let lm = FaceLandmarks::new([
+            (120.0, 350.0),
+            (180.0, 350.0),
+            (80.0, 420.0),
+            (100.0, 470.0),
+            (160.0, 470.0),
+        ]);
+        let bbox: BBox = (50.0, 300.0, 250.0, 500.0);
+
+        let mut b_no_offset = FaceRegionBuilder::new(PADDING, 0.0, None);
+        let r_no = b_no_offset.build(bbox, FRAME_W, FRAME_H, Some(&lm), None);
+        let cx_no = r_no.unclamped_x.unwrap() as f64 + r_no.full_width.unwrap() as f64 / 2.0;
+
+        let mut b_offset = FaceRegionBuilder::new(PADDING, 0.3, None);
+        let r_off = b_offset.build(bbox, FRAME_W, FRAME_H, Some(&lm), None);
+        let cx_off = r_off.unclamped_x.unwrap() as f64 + r_off.full_width.unwrap() as f64 / 2.0;
+
+        // Positive offset + left profile → center shifts right (larger cx)
+        assert!(
+            cx_off > cx_no,
+            "Expected offset center {cx_off} > no-offset center {cx_no}"
+        );
+    }
+
+    #[test]
+    fn test_center_offset_shifts_right_profile_leftward() {
+        // Right profile: nose is right of eye midpoint → back of head is left
+        let lm = FaceLandmarks::new([
+            (530.0, 350.0),
+            (590.0, 350.0),
+            (610.0, 420.0),
+            (550.0, 470.0),
+            (580.0, 470.0),
+        ]);
+        let bbox: BBox = (500.0, 300.0, 700.0, 500.0);
+
+        let mut b_no_offset = FaceRegionBuilder::new(PADDING, 0.0, None);
+        let r_no = b_no_offset.build(bbox, FRAME_W, FRAME_H, Some(&lm), None);
+        let cx_no = r_no.unclamped_x.unwrap() as f64 + r_no.full_width.unwrap() as f64 / 2.0;
+
+        let mut b_offset = FaceRegionBuilder::new(PADDING, 0.3, None);
+        let r_off = b_offset.build(bbox, FRAME_W, FRAME_H, Some(&lm), None);
+        let cx_off = r_off.unclamped_x.unwrap() as f64 + r_off.full_width.unwrap() as f64 / 2.0;
+
+        // Positive offset + right profile → center shifts left (smaller cx)
+        assert!(
+            cx_off < cx_no,
+            "Expected offset center {cx_off} < no-offset center {cx_no}"
+        );
+    }
+
+    #[test]
+    fn test_center_offset_frontal_no_shift() {
+        // Frontal face → back_of_head_direction returns 0.0 → no shift
+        let lm = frontal_landmarks();
+        let mut b_no = FaceRegionBuilder::new(PADDING, 0.0, None);
+        let r_no = b_no.build(frontal_box(), FRAME_W, FRAME_H, Some(&lm), None);
+
+        let mut b_off = FaceRegionBuilder::new(PADDING, 0.5, None);
+        let r_off = b_off.build(frontal_box(), FRAME_W, FRAME_H, Some(&lm), None);
+
+        // Centers should be identical for frontal face regardless of offset
+        let cx_no = r_no.unclamped_x.unwrap() as f64 + r_no.full_width.unwrap() as f64 / 2.0;
+        let cx_off = r_off.unclamped_x.unwrap() as f64 + r_off.full_width.unwrap() as f64 / 2.0;
+        assert_relative_eq!(cx_no, cx_off, epsilon = 1.0);
+    }
+
+    #[test]
+    fn test_center_offset_no_landmarks_no_shift() {
+        let mut b_no = FaceRegionBuilder::new(PADDING, 0.0, None);
+        let r_no = b_no.build(frontal_box(), FRAME_W, FRAME_H, None, None);
+
+        let mut b_off = FaceRegionBuilder::new(PADDING, 0.5, None);
+        let r_off = b_off.build(frontal_box(), FRAME_W, FRAME_H, None, None);
+
+        assert_eq!(r_no.x, r_off.x);
+        assert_eq!(r_no.width, r_off.width);
+    }
+
+    // ── Custom padding ────────────────────────────────────────────
+
+    #[test]
+    fn test_larger_padding_produces_larger_region() {
+        let mut b_small = FaceRegionBuilder::new(0.2, 0.0, None);
+        let r_small = b_small.build(frontal_box(), FRAME_W, FRAME_H, None, None);
+
+        let mut b_large = FaceRegionBuilder::new(0.8, 0.0, None);
+        let r_large = b_large.build(frontal_box(), FRAME_W, FRAME_H, None, None);
+
+        assert!(
+            r_large.full_width.unwrap() > r_small.full_width.unwrap(),
+            "Larger padding should produce larger width"
+        );
+        assert!(
+            r_large.full_height.unwrap() > r_small.full_height.unwrap(),
+            "Larger padding should produce larger height"
+        );
+    }
+
+    #[test]
+    fn test_zero_padding_matches_min_width_constraint() {
+        let mut b = FaceRegionBuilder::new(0.0, 0.0, None);
+        let r = b.build(frontal_box(), FRAME_W, FRAME_H, None, None);
+        // box is 200x200, padding=0 → half_w = max(200, 200*0.8) * 1.0 / 2 = 100
+        // full_w = 200
+        assert_eq!(r.full_width.unwrap(), 200);
+        assert_eq!(r.full_height.unwrap(), 200);
     }
 }

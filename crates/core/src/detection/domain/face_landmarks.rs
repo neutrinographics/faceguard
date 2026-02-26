@@ -51,6 +51,43 @@ impl FaceLandmarks {
         Ok((wx_sum / w_sum, wy_sum / w_sum))
     }
 
+    /// Direction toward the back of the head: -1.0, 0.0, or 1.0.
+    ///
+    /// Returns +1.0 when the nose is left of the eye midpoint (back of head is right),
+    /// -1.0 when the nose is right (back of head is left), and 0.0 for frontal faces
+    /// or when landmarks are not visible.
+    pub fn back_of_head_direction(&self) -> f64 {
+        let nose = self.points[NOSE];
+        let left_eye = self.points[LEFT_EYE];
+        let right_eye = self.points[RIGHT_EYE];
+
+        if nose.0 <= 0.0 || left_eye.0 <= 0.0 || right_eye.0 <= 0.0 {
+            return 0.0;
+        }
+
+        let eye_mid_x = (left_eye.0 + right_eye.0) / 2.0;
+        let eye_span = (right_eye.0 - left_eye.0).abs();
+
+        if eye_span <= 0.0 {
+            return 0.0;
+        }
+
+        let offset = nose.0 - eye_mid_x;
+
+        // Frontal threshold: nose within 15% of eye span from midpoint
+        if offset.abs() < eye_span * 0.15 {
+            return 0.0;
+        }
+
+        // Nose is left of midpoint → back of head is right (+1.0)
+        // Nose is right of midpoint → back of head is left (-1.0)
+        if offset < 0.0 {
+            1.0
+        } else {
+            -1.0
+        }
+    }
+
     /// How much the face is turned: 0.0 = frontal, 1.0 = full profile.
     ///
     /// Measures nose offset from eye midpoint relative to eye span.
@@ -229,6 +266,62 @@ mod tests {
     fn test_profile_ratio_missing_landmarks_returns_zero(#[case] pts: [(f64, f64); 5]) {
         let lm = FaceLandmarks::new(pts);
         assert_relative_eq!(lm.profile_ratio(), 0.0);
+    }
+
+    // ── back_of_head_direction ─────────────────────────────────────
+
+    #[test]
+    fn test_back_of_head_frontal_returns_zero() {
+        let lm = frontal_landmarks();
+        assert_relative_eq!(lm.back_of_head_direction(), 0.0);
+    }
+
+    #[test]
+    fn test_back_of_head_left_profile_returns_positive() {
+        let lm = left_profile_landmarks();
+        // Nose at 100, eye midpoint at 150 → nose is left → back of head is right
+        assert_relative_eq!(lm.back_of_head_direction(), 1.0);
+    }
+
+    #[test]
+    fn test_back_of_head_right_profile_returns_negative() {
+        let lm = right_profile_landmarks();
+        // Nose at 610, eye midpoint at 560 → nose is right → back of head is left
+        assert_relative_eq!(lm.back_of_head_direction(), -1.0);
+    }
+
+    #[rstest]
+    #[case::nose_invisible([(100.0, 100.0), (200.0, 100.0), (0.0, 0.0), (100.0, 100.0), (100.0, 100.0)])]
+    #[case::left_eye_invisible([(0.0, 0.0), (200.0, 100.0), (150.0, 100.0), (100.0, 100.0), (100.0, 100.0)])]
+    #[case::right_eye_invisible([(100.0, 100.0), (0.0, 0.0), (150.0, 100.0), (100.0, 100.0), (100.0, 100.0)])]
+    fn test_back_of_head_missing_landmarks_returns_zero(#[case] pts: [(f64, f64); 5]) {
+        let lm = FaceLandmarks::new(pts);
+        assert_relative_eq!(lm.back_of_head_direction(), 0.0);
+    }
+
+    #[test]
+    fn test_back_of_head_zero_eye_span_returns_zero() {
+        let lm = FaceLandmarks::new([
+            (100.0, 100.0),
+            (100.0, 100.0),
+            (150.0, 100.0),
+            (100.0, 100.0),
+            (100.0, 100.0),
+        ]);
+        assert_relative_eq!(lm.back_of_head_direction(), 0.0);
+    }
+
+    #[test]
+    fn test_back_of_head_near_frontal_within_threshold() {
+        // Nose slightly off-center but within 15% of eye span
+        let lm = FaceLandmarks::new([
+            (440.0, 350.0),
+            (560.0, 350.0), // eye_span = 120, threshold = 18
+            (505.0, 420.0), // offset = 5, well within threshold
+            (460.0, 470.0),
+            (540.0, 470.0),
+        ]);
+        assert_relative_eq!(lm.back_of_head_direction(), 0.0);
     }
 
     #[test]

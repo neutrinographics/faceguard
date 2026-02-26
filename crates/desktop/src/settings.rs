@@ -49,12 +49,20 @@ pub struct Settings {
     pub blur_shape: BlurShape,
     pub confidence: u32,
     pub blur_strength: u32,
+    #[serde(default = "default_blur_coverage")]
+    pub blur_coverage: u32,
+    #[serde(default)]
+    pub center_offset: i32,
     pub lookahead: u32,
     #[serde(default = "default_quality")]
     pub quality: u32,
     pub appearance: Appearance,
     pub high_contrast: bool,
     pub font_scale: f32,
+}
+
+fn default_blur_coverage() -> u32 {
+    40
 }
 
 fn default_quality() -> u32 {
@@ -75,6 +83,8 @@ impl Default for Settings {
             blur_shape: BlurShape::Ellipse,
             confidence: 50,
             blur_strength: 201,
+            blur_coverage: 40,
+            center_offset: 0,
             lookahead: 10,
             quality: default_quality(),
             appearance: Appearance::System,

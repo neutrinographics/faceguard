@@ -23,8 +23,7 @@ pub fn file_row<'a>(
     let border_base = border_light_color(theme);
     let border_hover = border_color(theme);
 
-    let display_text: Element<'a, Message> = if let Some(name) = path.and_then(|p| p.file_name())
-    {
+    let display_text: Element<'a, Message> = if let Some(name) = path.and_then(|p| p.file_name()) {
         text(name.to_string_lossy().to_string())
             .size(scaled(16.0, fs))
             .font(iced::Font {
@@ -57,9 +56,7 @@ pub fn file_row<'a>(
 
     let info = column![label_text, Space::new().height(2), display_text].width(Length::Fill);
 
-    let content = row![info, btn]
-        .spacing(8)
-        .align_y(iced::Alignment::Center);
+    let content = row![info, btn].spacing(8).align_y(iced::Alignment::Center);
 
     container(content)
         .padding([14, 16])

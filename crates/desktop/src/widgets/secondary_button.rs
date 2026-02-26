@@ -19,7 +19,15 @@ pub fn secondary_button<'a, Message: Clone + 'a>(
     on_hover: impl Fn(bool) -> Message + 'a,
     padding: [u16; 2],
 ) -> Element<'a, Message> {
-    secondary_button_inner(content, on_press, hovered, on_hover, padding, Length::Shrink, CORNER_RADIUS)
+    secondary_button_inner(
+        content,
+        on_press,
+        hovered,
+        on_hover,
+        padding,
+        Length::Shrink,
+        CORNER_RADIUS,
+    )
 }
 
 pub fn secondary_button_fill<'a, Message: Clone + 'a>(
@@ -29,7 +37,15 @@ pub fn secondary_button_fill<'a, Message: Clone + 'a>(
     on_hover: impl Fn(bool) -> Message + 'a,
     padding: [u16; 2],
 ) -> Element<'a, Message> {
-    secondary_button_inner(content, on_press, hovered, on_hover, padding, Length::Fill, CORNER_RADIUS)
+    secondary_button_inner(
+        content,
+        on_press,
+        hovered,
+        on_hover,
+        padding,
+        Length::Fill,
+        CORNER_RADIUS,
+    )
 }
 
 pub fn secondary_button_small<'a, Message: Clone + 'a>(
@@ -39,7 +55,15 @@ pub fn secondary_button_small<'a, Message: Clone + 'a>(
     on_hover: impl Fn(bool) -> Message + 'a,
     padding: [u16; 2],
 ) -> Element<'a, Message> {
-    secondary_button_inner(content, on_press, hovered, on_hover, padding, Length::Shrink, CORNER_RADIUS_SM)
+    secondary_button_inner(
+        content,
+        on_press,
+        hovered,
+        on_hover,
+        padding,
+        Length::Shrink,
+        CORNER_RADIUS_SM,
+    )
 }
 
 fn secondary_button_inner<'a, Message: Clone + 'a>(
@@ -88,9 +112,7 @@ fn build_button<'a, Message: Clone + 'a>(
             styled(theme, radius, amount)
         });
 
-    container(btn)
-        .padding(Padding::ZERO)
-        .into()
+    container(btn).padding(Padding::ZERO).into()
 }
 
 fn styled(theme: &Theme, radius: f32, hover_amount: f32) -> button::Style {
@@ -121,7 +143,11 @@ fn surface_alt_color(theme: &Theme) -> Color {
     let luma = p.background.r * 0.299 + p.background.g * 0.587 + p.background.b * 0.114;
     if luma > 0.5 {
         // Light theme: a warm off-white
-        Color::from_rgb(0xF0 as f32 / 255.0, 0xED as f32 / 255.0, 0xE8 as f32 / 255.0)
+        Color::from_rgb(
+            0xF0 as f32 / 255.0,
+            0xED as f32 / 255.0,
+            0xE8 as f32 / 255.0,
+        )
     } else {
         // Dark theme: slightly lighter than surface
         Color {

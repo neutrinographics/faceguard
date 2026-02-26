@@ -5,10 +5,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crossbeam_channel::Receiver;
-use iced::widget::{button, column, container, mouse_area, operation, row, scrollable, text, Space};
+use iced::widget::{
+    button, column, container, mouse_area, operation, row, scrollable, text, Space,
+};
 use iced::{Color, Element, Length, Subscription, Task, Theme};
-use iced_anim::AnimationBuilder;
 use iced_anim::transition::Easing;
+use iced_anim::AnimationBuilder;
 
 use crate::settings::{Appearance, BlurShape, Settings};
 use crate::tabs;
@@ -79,6 +81,8 @@ pub enum Message {
     BlurShapeChanged(BlurShape),
     ConfidenceChanged(u32),
     BlurStrengthChanged(u32),
+    BlurCoverageChanged(u32),
+    CenterOffsetChanged(i32),
     LookaheadChanged(u32),
     RestoreDefaults,
     AppearanceChanged(Appearance),
@@ -225,6 +229,16 @@ impl App {
                 self.settings.blur_strength = if val % 2 == 0 { val + 1 } else { val };
                 self.settings.save();
             }
+            Message::BlurCoverageChanged(val) => {
+                self.settings.blur_coverage = val;
+                self.settings.save();
+                self.invalidate_detection();
+            }
+            Message::CenterOffsetChanged(val) => {
+                self.settings.center_offset = val;
+                self.settings.save();
+                self.invalidate_detection();
+            }
             Message::LookaheadChanged(val) => {
                 self.settings.lookahead = val;
                 self.settings.save();
@@ -321,7 +335,14 @@ impl App {
                 .iter()
                 .enumerate()
                 .map(|(idx, &tab)| {
-                    tab_button(tab, tab == self.active_tab, self.tab_hovered[idx], idx, palette, fs)
+                    tab_button(
+                        tab,
+                        tab == self.active_tab,
+                        self.tab_hovered[idx],
+                        idx,
+                        palette,
+                        fs,
+                    )
                 })
                 .collect::<Vec<_>>())
             .spacing(4),
@@ -363,11 +384,20 @@ impl App {
                 self.show_folder_hovered,
                 self.blur_another_hovered,
             ),
-            Tab::Settings => tabs::settings_tab::view(&self.settings, self.gpu_context.is_some(), self.restore_defaults_hovered),
+            Tab::Settings => tabs::settings_tab::view(
+                &self.settings,
+                self.gpu_context.is_some(),
+                self.restore_defaults_hovered,
+            ),
             Tab::About => tabs::about_tab::view(fs, &current_theme, self.website_hovered),
         };
 
-        let padded_content = container(content).padding(iced::Padding { top: 24.0, right: 24.0, bottom: 24.0, left: 24.0 });
+        let padded_content = container(content).padding(iced::Padding {
+            top: 24.0,
+            right: 24.0,
+            bottom: 24.0,
+            left: 24.0,
+        });
 
         let tab_content = scrollable(padded_content)
             .id(iced::widget::Id::new(SCROLL_ID))
@@ -394,8 +424,8 @@ impl App {
             subs.push(iced::time::every(Duration::from_millis(50)).map(|_| Message::WorkerTick));
         }
 
-        subs.push(iced::event::listen_with(|event, _status, _id| {
-            match event {
+        subs.push(iced::event::listen_with(
+            |event, _status, _id| match event {
                 iced::Event::Window(iced::window::Event::FileDropped(path)) => {
                     Some(Message::FileDropped(path))
                 }
@@ -406,8 +436,8 @@ impl App {
                     Some(Message::DropZoneHover(false))
                 }
                 _ => None,
-            }
-        }));
+            },
+        ));
 
         Subscription::batch(subs)
     }
@@ -479,6 +509,8 @@ impl App {
             let params = PreviewParams {
                 input_path: input,
                 confidence: self.settings.confidence,
+                blur_coverage: self.settings.blur_coverage,
+                center_offset: self.settings.center_offset,
                 model_cache: self.model_cache.clone(),
             };
             let (rx, cancel) = preview_worker::spawn(params);
@@ -496,6 +528,8 @@ impl App {
                 blur_shape: self.settings.blur_shape,
                 confidence: self.settings.confidence,
                 blur_strength: self.settings.blur_strength,
+                blur_coverage: self.settings.blur_coverage,
+                center_offset: self.settings.center_offset,
                 lookahead: self.settings.lookahead,
                 quality: self.settings.quality,
                 detection_cache: self.detection_cache.clone(),
@@ -656,10 +690,12 @@ fn tab_button<'a>(
             .on_press(Message::TabSelected(tab))
             .padding([12, 20])
             .width(Length::Shrink)
-            .style(move |_theme: &Theme, _status: button::Status| button::Style {
-                text_color: color,
-                ..button::Style::default()
-            });
+            .style(
+                move |_theme: &Theme, _status: button::Status| button::Style {
+                    text_color: color,
+                    ..button::Style::default()
+                },
+            );
 
         let bar: Element<'_, Message> = if is_active {
             container(

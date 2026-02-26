@@ -17,7 +17,10 @@ pub fn view(
     let accent = palette.primary.base.color;
 
     let base_style = DashedBorderStyle {
-        border_color: Color { a: 0.20, ..palette.background.base.text },
+        border_color: Color {
+            a: 0.20,
+            ..palette.background.base.text
+        },
         border_width: 2.0,
         dash_length: 3.0,
         gap_length: 3.0,
@@ -33,12 +36,8 @@ pub fn view(
 
     let inner_content = build_inner(fs, tertiary, accent, browse_hovered);
 
-    let drop_zone = dashed_container(
-        base_style,
-        [scaled(56.0, fs) as u16, 40],
-        inner_content,
-    )
-    .hover_style(hover_style, drop_zone_hovered);
+    let drop_zone = dashed_container(base_style, [scaled(56.0, fs) as u16, 40], inner_content)
+        .hover_style(hover_style, drop_zone_hovered);
 
     let wrapped = container(drop_zone)
         .width(Length::Fill)

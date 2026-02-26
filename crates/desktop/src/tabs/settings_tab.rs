@@ -148,6 +148,64 @@ fn blur_section<'a>(
         border,
     );
 
+    let coverage_card = setting_card(
+        column![
+            row![
+                setting_name("Coverage", fs),
+                Space::new().width(Length::Fill),
+                value_badge(format!("{}%", settings.blur_coverage), fs, accent),
+            ]
+            .align_y(iced::Alignment::Center),
+            Space::new().height(4),
+            text("How far the blur extends beyond the detected face.")
+                .size(scaled(14.0, fs))
+                .color(tertiary),
+            Space::new().height(12),
+            slider(
+                0..=100,
+                settings.blur_coverage,
+                Message::BlurCoverageChanged
+            )
+            .step(5u32)
+            .style(slider_style),
+        ]
+        .spacing(0),
+        surface,
+        border,
+    );
+
+    let offset_label = if settings.center_offset == 0 {
+        "Center".to_string()
+    } else {
+        format!("{}%", settings.center_offset)
+    };
+
+    let center_offset_card = setting_card(
+        column![
+            row![
+                setting_name("Position offset", fs),
+                Space::new().width(Length::Fill),
+                value_badge(offset_label, fs, accent),
+            ]
+            .align_y(iced::Alignment::Center),
+            Space::new().height(4),
+            text("Shift the blur toward the back of the head for profile faces.")
+                .size(scaled(14.0, fs))
+                .color(tertiary),
+            Space::new().height(12),
+            slider(
+                -50..=50i32,
+                settings.center_offset,
+                Message::CenterOffsetChanged
+            )
+            .step(5i32)
+            .style(slider_style),
+        ]
+        .spacing(0),
+        surface,
+        border,
+    );
+
     let quality_card = setting_card(
         column![
             row![
@@ -176,6 +234,10 @@ fn blur_section<'a>(
         shape_card,
         Space::new().height(10),
         intensity_card,
+        Space::new().height(10),
+        coverage_card,
+        Space::new().height(10),
+        center_offset_card,
         Space::new().height(10),
         quality_card,
     ]
@@ -399,12 +461,18 @@ fn pill_button<'a>(
     .style(move |_theme: &Theme, status| {
         let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
         let bg = if !is_active && hovered {
-            Color { a: 0.08, ..border_color }
+            Color {
+                a: 0.08,
+                ..border_color
+            }
         } else {
             bg
         };
         let pill_border_color = if !is_active && hovered {
-            Color { a: 0.25, ..border_color }
+            Color {
+                a: 0.25,
+                ..border_color
+            }
         } else {
             pill_border_color
         };

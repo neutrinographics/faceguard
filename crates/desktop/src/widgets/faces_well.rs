@@ -90,7 +90,12 @@ impl FacesWellState {
     }
 }
 
-pub fn view<'a>(state: &FacesWellState, fs: f32, theme: &Theme, hovered: &std::collections::HashSet<u32>) -> Element<'a, Message> {
+pub fn view<'a>(
+    state: &FacesWellState,
+    fs: f32,
+    theme: &Theme,
+    hovered: &std::collections::HashSet<u32>,
+) -> Element<'a, Message> {
     if !state.has_faces() {
         return column![].into();
     }
@@ -137,7 +142,12 @@ pub fn view<'a>(state: &FacesWellState, fs: f32, theme: &Theme, hovered: &std::c
         .into()
 }
 
-fn build_individual_grid<'a>(state: &FacesWellState, fs: f32, theme: &Theme, hovered: &std::collections::HashSet<u32>) -> Element<'a, Message> {
+fn build_individual_grid<'a>(
+    state: &FacesWellState,
+    fs: f32,
+    theme: &Theme,
+    hovered: &std::collections::HashSet<u32>,
+) -> Element<'a, Message> {
     let mut sorted_ids: Vec<u32> = state.crops.keys().copied().collect();
     sorted_ids.sort();
 
@@ -162,7 +172,12 @@ fn build_individual_grid<'a>(state: &FacesWellState, fs: f32, theme: &Theme, hov
     wrap_cards(cards)
 }
 
-fn build_grouped_grid<'a>(state: &FacesWellState, fs: f32, theme: &Theme, hovered: &std::collections::HashSet<u32>) -> Element<'a, Message> {
+fn build_grouped_grid<'a>(
+    state: &FacesWellState,
+    fs: f32,
+    theme: &Theme,
+    hovered: &std::collections::HashSet<u32>,
+) -> Element<'a, Message> {
     let cards: Vec<Element<'a, Message>> = state
         .groups
         .iter()
@@ -216,4 +231,3 @@ fn wrap_cards(cards: Vec<Element<'_, Message>>) -> Element<'_, Message> {
 
     rows_col.into()
 }
-

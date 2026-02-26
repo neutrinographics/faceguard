@@ -9,7 +9,7 @@ use crossbeam_channel::{Receiver, Sender};
 use faceguard_core::blurring::infrastructure::blurrer_factory;
 use faceguard_core::blurring::infrastructure::gpu_context::GpuContext;
 use faceguard_core::detection::domain::face_detector::FaceDetector;
-use faceguard_core::detection::domain::face_region_builder::{FaceRegionBuilder, DEFAULT_PADDING};
+use faceguard_core::detection::domain::face_region_builder::FaceRegionBuilder;
 use faceguard_core::detection::domain::region_merger::RegionMerger;
 use faceguard_core::detection::domain::region_smoother::{RegionSmoother, DEFAULT_ALPHA};
 use faceguard_core::detection::infrastructure::bytetrack_tracker::ByteTracker;
@@ -46,6 +46,8 @@ pub struct BlurParams {
     pub blur_shape: crate::settings::BlurShape,
     pub confidence: u32,
     pub blur_strength: u32,
+    pub blur_coverage: u32,
+    pub center_offset: i32,
     pub lookahead: u32,
     pub quality: u32,
     pub detection_cache: Option<Arc<HashMap<usize, Vec<Region>>>>,
@@ -123,8 +125,10 @@ fn build_detector(
         return Err("Cancelled".into());
     }
 
+    let padding = params.blur_coverage as f64 / 100.0;
+    let center_offset = params.center_offset as f64 / 100.0;
     let smoother = RegionSmoother::new(DEFAULT_ALPHA);
-    let region_builder = FaceRegionBuilder::new(DEFAULT_PADDING, Some(Box::new(smoother)));
+    let region_builder = FaceRegionBuilder::new(padding, center_offset, Some(Box::new(smoother)));
     let tracker = ByteTracker::new(TRACKER_MAX_LOST);
 
     let det = match params.model_cache.get_yolo_session() {

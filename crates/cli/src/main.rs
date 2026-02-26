@@ -7,7 +7,7 @@ use clap::Parser;
 use faceguard_core::blurring::domain::frame_blurrer::FrameBlurrer;
 use faceguard_core::blurring::infrastructure::blurrer_factory::{create_blurrer, BlurShape};
 use faceguard_core::detection::domain::face_detector::FaceDetector;
-use faceguard_core::detection::domain::face_region_builder::{FaceRegionBuilder, DEFAULT_PADDING};
+use faceguard_core::detection::domain::face_region_builder::FaceRegionBuilder;
 use faceguard_core::detection::domain::region_merger::RegionMerger;
 use faceguard_core::detection::domain::region_smoother::{RegionSmoother, DEFAULT_ALPHA};
 use faceguard_core::detection::infrastructure::bytetrack_tracker::ByteTracker;
@@ -70,6 +70,14 @@ struct Cli {
     /// Blur all faces except these track IDs (comma-separated).
     #[arg(long, value_delimiter = ',')]
     exclude_ids: Option<Vec<u32>>,
+
+    /// Blur coverage: how far the blur extends beyond the face (0.0-1.0).
+    #[arg(long, default_value = "0.4")]
+    padding: f64,
+
+    /// Shift blur center toward back of head for profile faces (-0.5 to 0.5).
+    #[arg(long, default_value = "0.0")]
+    center_offset: f64,
 
     /// H.264 CRF quality (0=lossless, 51=worst, default 18).
     #[arg(long)]
@@ -229,7 +237,8 @@ fn build_detector(cli: &Cli) -> Result<Box<dyn FaceDetector>, Box<dyn std::error
     eprintln!();
 
     let smoother = RegionSmoother::new(DEFAULT_ALPHA);
-    let region_builder = FaceRegionBuilder::new(DEFAULT_PADDING, Some(Box::new(smoother)));
+    let region_builder =
+        FaceRegionBuilder::new(cli.padding, cli.center_offset, Some(Box::new(smoother)));
     let tracker = ByteTracker::new(TRACKER_MAX_LOST);
     let base: Box<dyn FaceDetector> = Box::new(OnnxYoloDetector::new(
         &model_path,
@@ -273,6 +282,16 @@ fn validate(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
         if q > 51 {
             return Err(format!("Quality must be between 0 and 51, got {q}").into());
         }
+    }
+    if !(0.0..=1.0).contains(&cli.padding) {
+        return Err(format!("Padding must be between 0.0 and 1.0, got {}", cli.padding).into());
+    }
+    if !(-0.5..=0.5).contains(&cli.center_offset) {
+        return Err(format!(
+            "Center offset must be between -0.5 and 0.5, got {}",
+            cli.center_offset
+        )
+        .into());
     }
     if cli.blur_shape != "ellipse" && cli.blur_shape != "rect" {
         return Err(format!(

@@ -8,7 +8,7 @@ use crossbeam_channel::{Receiver, Sender};
 
 use faceguard_core::detection::domain::face_detector::FaceDetector;
 use faceguard_core::detection::domain::face_grouper::FaceGrouper;
-use faceguard_core::detection::domain::face_region_builder::{FaceRegionBuilder, DEFAULT_PADDING};
+use faceguard_core::detection::domain::face_region_builder::FaceRegionBuilder;
 use faceguard_core::detection::domain::region_smoother::{RegionSmoother, DEFAULT_ALPHA};
 use faceguard_core::detection::infrastructure::bytetrack_tracker::ByteTracker;
 use faceguard_core::detection::infrastructure::histogram_face_grouper::HistogramFaceGrouper;
@@ -43,6 +43,8 @@ pub struct PreviewResult {
 pub struct PreviewParams {
     pub input_path: PathBuf,
     pub confidence: u32,
+    pub blur_coverage: u32,
+    pub center_offset: i32,
     pub model_cache: Arc<ModelCache>,
 }
 
@@ -138,8 +140,10 @@ fn build_detector(
         return Err("Cancelled".into());
     }
 
+    let padding = params.blur_coverage as f64 / 100.0;
+    let center_offset = params.center_offset as f64 / 100.0;
     let smoother = RegionSmoother::new(DEFAULT_ALPHA);
-    let region_builder = FaceRegionBuilder::new(DEFAULT_PADDING, Some(Box::new(smoother)));
+    let region_builder = FaceRegionBuilder::new(padding, center_offset, Some(Box::new(smoother)));
     let tracker = ByteTracker::new(TRACKER_MAX_LOST);
 
     let det = match params.model_cache.get_yolo_session() {
