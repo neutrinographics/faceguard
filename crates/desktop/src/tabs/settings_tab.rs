@@ -1,38 +1,73 @@
-use iced::widget::{button, checkbox, column, container, pick_list, row, slider, text, Space};
-use iced::Element;
+use iced::widget::{button, checkbox, column, container, row, slider, text, Space};
+use iced::{Color, Element, Length, Theme};
 
 use crate::app::{scaled, Message};
 use crate::settings::{Appearance, BlurShape, Settings};
-use crate::theme::{muted_color, section_color, tertiary_color};
+use crate::theme::{muted_color, section_color, surface_color, tertiary_color};
+use crate::widgets::secondary_button;
 
-pub fn view<'a>(settings: &Settings, gpu_available: bool) -> Element<'a, Message> {
+pub fn view<'a>(
+    settings: &Settings,
+    gpu_available: bool,
+    restore_defaults_hovered: bool,
+) -> Element<'a, Message> {
     let fs = settings.font_scale;
     let theme = crate::theme::resolve_theme(settings.appearance, settings.high_contrast);
     let muted = muted_color(&theme);
     let section = section_color(&theme);
     let tertiary = tertiary_color(&theme);
+    let surface = surface_color(&theme);
+    let border = border_light_color(&theme);
+    let accent = theme.palette().primary;
+
+    let restore_btn = secondary_button::secondary_button_small(
+        move || text("Restore Defaults").size(scaled(13.0, fs)).into(),
+        Message::RestoreDefaults,
+        restore_defaults_hovered,
+        Message::RestoreDefaultsHover,
+        [8, 18],
+    );
 
     column![
-        blur_section(settings, fs, muted, section, tertiary, gpu_available),
+        blur_section(
+            settings,
+            fs,
+            muted,
+            section,
+            tertiary,
+            surface,
+            border,
+            accent,
+            gpu_available
+        ),
         Space::new().height(28),
-        detection_section(settings, fs, muted, section, tertiary),
+        detection_section(settings, fs, muted, section, tertiary, surface, border, accent),
         Space::new().height(28),
-        appearance_section(settings, fs, section, tertiary),
+        appearance_section(settings, fs, section, tertiary, surface, border, accent),
         Space::new().height(24),
-        button(text("Restore Defaults").size(scaled(13.0, fs)))
-            .on_press(Message::RestoreDefaults)
-            .padding([8, 18])
-            .style(button::secondary),
+        restore_btn,
     ]
     .spacing(0)
     .into()
 }
 
-fn setting_card<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+fn setting_card<'a>(
+    content: impl Into<Element<'a, Message>>,
+    surface: Color,
+    border_color: Color,
+) -> Element<'a, Message> {
     container(content)
         .padding(18)
-        .style(container::rounded_box)
-        .width(iced::Length::Fill)
+        .width(Length::Fill)
+        .style(move |_theme: &Theme| container::Style {
+            background: Some(surface.into()),
+            border: iced::border::Border {
+                color: border_color,
+                width: 1.0,
+                radius: 12.0.into(),
+            },
+            ..container::Style::default()
+        })
         .into()
 }
 
@@ -42,6 +77,9 @@ fn blur_section<'a>(
     _muted: iced::Color,
     section: iced::Color,
     tertiary: iced::Color,
+    surface: iced::Color,
+    border: iced::Color,
+    accent: iced::Color,
     gpu_available: bool,
 ) -> Element<'a, Message> {
     let intensity_label = blur_intensity_label(settings.blur_strength);
@@ -51,19 +89,26 @@ fn blur_section<'a>(
         "Blur backend: CPU"
     };
 
+    let shape_pills: Element<'a, Message> = row(BlurShape::ALL.iter().map(|&variant| {
+        let is_active = variant == settings.blur_shape;
+        pill_button(
+            variant.to_string(),
+            is_active,
+            Message::BlurShapeChanged(variant),
+            fs,
+            accent,
+            border,
+            tertiary,
+        )
+    }))
+    .spacing(8)
+    .into();
+
     let shape_card = setting_card(
         column![
-            row![
-                text("Shape").size(scaled(14.0, fs)),
-                Space::new().width(12),
-                pick_list(
-                    BlurShape::ALL,
-                    Some(settings.blur_shape),
-                    Message::BlurShapeChanged
-                )
-                .text_size(scaled(13.0, fs)),
-            ]
-            .align_y(iced::Alignment::Center),
+            setting_name("Shape", fs),
+            Space::new().height(8),
+            shape_pills,
             Space::new().height(4),
             text(match settings.blur_shape {
                 BlurShape::Ellipse => "Ellipse follows the natural shape of a face.",
@@ -73,14 +118,16 @@ fn blur_section<'a>(
             .color(tertiary),
         ]
         .spacing(0),
+        surface,
+        border,
     );
 
     let intensity_card = setting_card(
         column![
             row![
-                text("Intensity").size(scaled(14.0, fs)),
-                Space::new().width(iced::Length::Fill),
-                text(intensity_label).size(scaled(13.0, fs)).color(tertiary),
+                setting_name("Intensity", fs),
+                Space::new().width(Length::Fill),
+                value_badge(intensity_label, fs, accent),
             ]
             .align_y(iced::Alignment::Center),
             Space::new().height(4),
@@ -93,19 +140,20 @@ fn blur_section<'a>(
                 settings.blur_strength,
                 Message::BlurStrengthChanged
             )
-            .step(2u32),
+            .step(2u32)
+            .style(slider_style),
         ]
         .spacing(0),
+        surface,
+        border,
     );
 
     let quality_card = setting_card(
         column![
             row![
-                text("Output quality").size(scaled(14.0, fs)),
-                Space::new().width(iced::Length::Fill),
-                text(quality_label(settings.quality))
-                    .size(scaled(13.0, fs))
-                    .color(tertiary),
+                setting_name("Output quality", fs),
+                Space::new().width(Length::Fill),
+                value_badge(quality_label(settings.quality), fs, accent),
             ]
             .align_y(iced::Alignment::Center),
             Space::new().height(4),
@@ -113,15 +161,17 @@ fn blur_section<'a>(
                 .size(scaled(13.0, fs))
                 .color(tertiary),
             Space::new().height(12),
-            slider(0..=100, settings.quality, Message::QualityChanged),
+            slider(0..=100, settings.quality, Message::QualityChanged).style(slider_style),
             Space::new().height(8),
             text(backend_label).size(scaled(11.0, fs)).color(tertiary),
         ]
         .spacing(0),
+        surface,
+        border,
     );
 
     column![
-        text("BLUR").size(scaled(11.0, fs)).color(section),
+        section_label("BLUR", fs, section),
         Space::new().height(14),
         shape_card,
         Space::new().height(10),
@@ -139,51 +189,55 @@ fn detection_section<'a>(
     _muted: iced::Color,
     section: iced::Color,
     tertiary: iced::Color,
+    surface: iced::Color,
+    border: iced::Color,
+    accent: iced::Color,
 ) -> Element<'a, Message> {
-    let sensitivity_label = sensitivity_label(settings.confidence);
+    let sens_label = sensitivity_label(settings.confidence);
 
     let sensitivity_card = setting_card(
         column![
             row![
-                text("Sensitivity").size(scaled(14.0, fs)),
-                Space::new().width(iced::Length::Fill),
-                text(sensitivity_label)
-                    .size(scaled(13.0, fs))
-                    .color(tertiary),
+                setting_name("Sensitivity", fs),
+                Space::new().width(Length::Fill),
+                value_badge(sens_label, fs, accent),
             ]
             .align_y(iced::Alignment::Center),
             Space::new().height(4),
-            text("How certain the detector must be that something is a face.")
+            text("How certain the detector must be that something is a face. Lower values catch more faces but may have false positives.")
                 .size(scaled(13.0, fs))
                 .color(tertiary),
             Space::new().height(12),
-            slider(10..=100, settings.confidence, Message::ConfidenceChanged),
+            slider(10..=100, settings.confidence, Message::ConfidenceChanged).style(slider_style),
         ]
         .spacing(0),
+        surface,
+        border,
     );
 
     let lookahead_card = setting_card(
         column![
             row![
-                text("Lookahead").size(scaled(14.0, fs)),
-                Space::new().width(iced::Length::Fill),
-                text(format!("{} frames", settings.lookahead))
-                    .size(scaled(13.0, fs))
-                    .color(tertiary),
+                setting_name("Lookahead", fs),
+                Space::new().width(Length::Fill),
+                value_badge(format!("{} frames", settings.lookahead), fs, accent),
             ]
             .align_y(iced::Alignment::Center),
             Space::new().height(4),
-            text("Scan ahead to blur faces before they fully enter the frame.")
+            text("Scan ahead to blur faces before they fully enter the frame. A larger value helps with fast moving faces.")
                 .size(scaled(13.0, fs))
                 .color(tertiary),
             Space::new().height(12),
-            slider(0..=30, settings.lookahead, Message::LookaheadChanged),
+            slider(0..=30, settings.lookahead, Message::LookaheadChanged)
+                .style(slider_style),
         ]
         .spacing(0),
+        surface,
+        border,
     );
 
     column![
-        text("DETECTION").size(scaled(11.0, fs)).color(section),
+        section_label("DETECTION", fs, section),
         Space::new().height(14),
         sensitivity_card,
         Space::new().height(10),
@@ -198,15 +252,31 @@ fn appearance_section<'a>(
     fs: f32,
     section: iced::Color,
     tertiary: iced::Color,
+    surface: iced::Color,
+    border: iced::Color,
+    accent: iced::Color,
 ) -> Element<'a, Message> {
+    let current = settings.appearance;
+    let theme_pills: Element<'a, Message> = row(Appearance::ALL.iter().map(|&variant| {
+        let is_active = variant == current;
+        pill_button(
+            variant.to_string(),
+            is_active,
+            Message::AppearanceChanged(variant),
+            fs,
+            accent,
+            border,
+            tertiary,
+        )
+    }))
+    .spacing(8)
+    .into();
+
     let theme_card = setting_card(
         column![
-            text("Theme").size(scaled(14.0, fs)),
-            Space::new().height(8),
-            pick_list(Appearance::ALL, Some(settings.appearance), |a| {
-                Message::AppearanceChanged(a)
-            })
-            .text_size(scaled(13.0, fs)),
+            setting_name("Theme", fs),
+            Space::new().height(10),
+            theme_pills,
             Space::new().height(12),
             checkbox(settings.high_contrast)
                 .label("High contrast")
@@ -214,26 +284,30 @@ fn appearance_section<'a>(
                 .text_size(scaled(13.0, fs)),
         ]
         .spacing(0),
+        surface,
+        border,
     );
 
     let scale_card = setting_card(
         column![
             row![
-                text("Interface scale").size(scaled(14.0, fs)),
-                Space::new().width(iced::Length::Fill),
-                text(format!("{:.0}%", settings.font_scale * 100.0))
-                    .size(scaled(13.0, fs))
-                    .color(tertiary),
+                setting_name("Interface scale", fs),
+                Space::new().width(Length::Fill),
+                value_badge(format!("{:.0}%", settings.font_scale * 100.0), fs, accent),
             ]
             .align_y(iced::Alignment::Center),
             Space::new().height(12),
-            slider(0.8..=1.5, settings.font_scale, Message::FontScaleChanged).step(0.05),
+            slider(0.8..=1.5, settings.font_scale, Message::FontScaleChanged)
+                .step(0.05)
+                .style(slider_style),
         ]
         .spacing(0),
+        surface,
+        border,
     );
 
     column![
-        text("APPEARANCE").size(scaled(11.0, fs)).color(section),
+        section_label("APPEARANCE", fs, section),
         Space::new().height(14),
         theme_card,
         Space::new().height(10),
@@ -268,5 +342,106 @@ fn sensitivity_label(confidence: u32) -> String {
         36..=65 => "Medium",
         _ => "High",
     };
-    format!("{qual} ({:.2})", confidence as f64 / 100.0)
+    format!("{qual} ({confidence}%)")
+}
+
+fn section_label<'a>(label: &str, fs: f32, color: Color) -> iced::widget::Text<'a> {
+    text(label.to_string())
+        .size(scaled(11.0, fs))
+        .color(color)
+        .font(iced::Font {
+            weight: iced::font::Weight::Semibold,
+            ..iced::Font::DEFAULT
+        })
+}
+
+fn border_light_color(theme: &Theme) -> Color {
+    let p = theme.palette();
+    Color { a: 0.15, ..p.text }
+}
+
+fn setting_name<'a>(label: &str, fs: f32) -> iced::widget::Text<'a> {
+    text(label.to_string())
+        .size(scaled(14.0, fs))
+        .font(iced::Font {
+            weight: iced::font::Weight::Semibold,
+            ..iced::Font::DEFAULT
+        })
+}
+
+fn pill_button<'a>(
+    label: String,
+    is_active: bool,
+    on_press: Message,
+    fs: f32,
+    accent: Color,
+    border_color: Color,
+    tertiary: Color,
+) -> Element<'a, Message> {
+    let (text_color, bg, pill_border_color, pill_border_width) = if is_active {
+        let accent_bg = Color { a: 0.12, ..accent };
+        (accent, accent_bg, accent, 1.5)
+    } else {
+        (tertiary, Color::TRANSPARENT, border_color, 1.0)
+    };
+
+    button(
+        text(label)
+            .size(scaled(13.0, fs))
+            .color(text_color)
+            .font(iced::Font {
+                weight: iced::font::Weight::Semibold,
+                ..iced::Font::DEFAULT
+            }),
+    )
+    .on_press(on_press)
+    .padding([6, 16])
+    .style(move |_theme: &Theme, _status| button::Style {
+        background: Some(bg.into()),
+        text_color,
+        border: iced::border::Border {
+            color: pill_border_color,
+            width: pill_border_width,
+            radius: 20.0.into(),
+        },
+        ..button::Style::default()
+    })
+    .into()
+}
+
+fn value_badge<'a>(label: String, fs: f32, accent: Color) -> Element<'a, Message> {
+    let accent_bg = Color { a: 0.12, ..accent };
+    container(
+        text(label)
+            .size(scaled(13.0, fs))
+            .color(accent)
+            .font(iced::Font {
+                weight: iced::font::Weight::Semibold,
+                ..iced::Font::DEFAULT
+            }),
+    )
+    .padding([2, 10])
+    .style(move |_theme: &Theme| container::Style {
+        background: Some(accent_bg.into()),
+        border: iced::border::Border {
+            radius: 20.0.into(),
+            ..iced::border::Border::default()
+        },
+        ..container::Style::default()
+    })
+    .into()
+}
+
+fn slider_style(theme: &Theme, status: slider::Status) -> slider::Style {
+    let p = theme.palette();
+    let accent = p.primary;
+    let mut s = slider::default(theme, status);
+    s.rail.backgrounds.1 = p.background.into();
+    s.rail.width = 6.0;
+    s.rail.border.radius = 3.0.into();
+    s.handle.shape = slider::HandleShape::Circle { radius: 8.0 };
+    s.handle.background = Color::WHITE.into();
+    s.handle.border_color = accent;
+    s.handle.border_width = 2.0;
+    s
 }
