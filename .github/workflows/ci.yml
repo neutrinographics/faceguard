@@ -38,7 +38,9 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           choco install ffmpeg-full
-          echo "FFMPEG_DIR=C:\ProgramData\chocolatey\lib\ffmpeg-full\tools\ffmpeg" >> $env:GITHUB_ENV
+          $ffmpegDir = "C:\ProgramData\chocolatey\lib\ffmpeg-full\tools\ffmpeg"
+          echo "FFMPEG_DIR=$ffmpegDir" >> $env:GITHUB_ENV
+          echo "INCLUDE=$ffmpegDir\include" >> $env:GITHUB_ENV
 
       - name: Run tests
         run: cargo test
