@@ -14,7 +14,7 @@ const BADGE_RADIUS: f32 = 10.0;
 const CHECK_SIZE: f32 = 20.0;
 const SCALE_GROW: f32 = 2.0;
 const SHADOW_BLUR: f32 = 10.0;
-const SHADOW_OFFSET_Y: f32 = 2.0;
+const SHADOW_OFFSET_Y: f32 = 3.0;
 const SHADOW_ALPHA: f32 = 0.15;
 const ANIMATION_DURATION: Duration = Duration::from_millis(200);
 
