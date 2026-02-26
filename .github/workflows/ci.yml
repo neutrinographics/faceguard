@@ -84,7 +84,7 @@ jobs:
 
       - name: Install build deps (macOS)
         if: runner.os == 'macOS'
-        run: brew install nasm pkg-config
+        run: brew install nasm pkg-config x264
 
       - name: Install build deps (Windows)
         if: runner.os == 'Windows'
