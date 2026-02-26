@@ -350,7 +350,7 @@ fn section_label<'a>(label: &str, fs: f32, color: Color) -> iced::widget::Text<'
         .size(scaled(11.0, fs))
         .color(color)
         .font(iced::Font {
-            weight: iced::font::Weight::Semibold,
+            weight: iced::font::Weight::Bold,
             ..iced::Font::DEFAULT
         })
 }
