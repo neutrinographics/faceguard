@@ -17,9 +17,9 @@ use crate::widgets::faces_well::FacesWellState;
 use crate::workers::blur_worker::{self, BlurParams, WorkerMessage};
 use crate::workers::model_cache::ModelCache;
 use crate::workers::preview_worker::{self, PreviewMessage, PreviewParams};
-use video_blur_core::blurring::infrastructure::blurrer_factory;
-use video_blur_core::blurring::infrastructure::gpu_context::GpuContext;
-use video_blur_core::shared::region::Region;
+use faceguard_core::blurring::infrastructure::blurrer_factory;
+use faceguard_core::blurring::infrastructure::gpu_context::GpuContext;
+use faceguard_core::shared::region::Region;
 
 const WEBSITE_URL: &str = "https://www.neutrinographics.com/";
 const SCROLL_ID: &str = "tab-scroll";

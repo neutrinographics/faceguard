@@ -6,22 +6,22 @@ use std::thread;
 
 use crossbeam_channel::{Receiver, Sender};
 
-use video_blur_core::detection::domain::face_detector::FaceDetector;
-use video_blur_core::detection::domain::face_grouper::FaceGrouper;
-use video_blur_core::detection::domain::face_region_builder::{FaceRegionBuilder, DEFAULT_PADDING};
-use video_blur_core::detection::domain::region_smoother::{RegionSmoother, DEFAULT_ALPHA};
-use video_blur_core::detection::infrastructure::bytetrack_tracker::ByteTracker;
-use video_blur_core::detection::infrastructure::histogram_face_grouper::HistogramFaceGrouper;
-use video_blur_core::detection::infrastructure::onnx_yolo_detector::OnnxYoloDetector;
-use video_blur_core::detection::infrastructure::skip_frame_detector::SkipFrameDetector;
-use video_blur_core::pipeline::preview_faces_use_case::PreviewFacesUseCase;
-use video_blur_core::shared::constants::{IMAGE_EXTENSIONS, TRACKER_MAX_LOST};
-use video_blur_core::shared::region::Region;
-use video_blur_core::video::domain::image_writer::ImageWriter;
-use video_blur_core::video::domain::video_reader::VideoReader;
-use video_blur_core::video::infrastructure::ffmpeg_reader::FfmpegReader;
-use video_blur_core::video::infrastructure::image_file_reader::ImageFileReader;
-use video_blur_core::video::infrastructure::image_file_writer::ImageFileWriter;
+use faceguard_core::detection::domain::face_detector::FaceDetector;
+use faceguard_core::detection::domain::face_grouper::FaceGrouper;
+use faceguard_core::detection::domain::face_region_builder::{FaceRegionBuilder, DEFAULT_PADDING};
+use faceguard_core::detection::domain::region_smoother::{RegionSmoother, DEFAULT_ALPHA};
+use faceguard_core::detection::infrastructure::bytetrack_tracker::ByteTracker;
+use faceguard_core::detection::infrastructure::histogram_face_grouper::HistogramFaceGrouper;
+use faceguard_core::detection::infrastructure::onnx_yolo_detector::OnnxYoloDetector;
+use faceguard_core::detection::infrastructure::skip_frame_detector::SkipFrameDetector;
+use faceguard_core::pipeline::preview_faces_use_case::PreviewFacesUseCase;
+use faceguard_core::shared::constants::{IMAGE_EXTENSIONS, TRACKER_MAX_LOST};
+use faceguard_core::shared::region::Region;
+use faceguard_core::video::domain::image_writer::ImageWriter;
+use faceguard_core::video::domain::video_reader::VideoReader;
+use faceguard_core::video::infrastructure::ffmpeg_reader::FfmpegReader;
+use faceguard_core::video::infrastructure::image_file_reader::ImageFileReader;
+use faceguard_core::video::infrastructure::image_file_writer::ImageFileWriter;
 
 use super::model_cache::ModelCache;
 
@@ -192,10 +192,10 @@ fn group_faces(
         .collect();
 
     if let Ok(ref model_path) = embedding_path {
-        use video_blur_core::detection::infrastructure::embedding_face_grouper::EmbeddingFaceGrouper;
+        use faceguard_core::detection::infrastructure::embedding_face_grouper::EmbeddingFaceGrouper;
         match EmbeddingFaceGrouper::new(
             model_path,
-            video_blur_core::detection::infrastructure::embedding_face_grouper::DEFAULT_THRESHOLD,
+            faceguard_core::detection::infrastructure::embedding_face_grouper::DEFAULT_THRESHOLD,
         ) {
             Ok(grouper) => match grouper.group(&crop_refs) {
                 Ok(groups) => return Ok(groups),

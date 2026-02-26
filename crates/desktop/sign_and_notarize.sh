@@ -56,7 +56,7 @@ find "$APP_PATH/Contents/Frameworks" "$APP_PATH/Contents/Resources" \
 
 # Sign the main executable
 codesign --force --options runtime --timestamp \
-    --sign "$SIGNING_IDENTITY" "$APP_PATH/Contents/MacOS/video-blur-desktop"
+    --sign "$SIGNING_IDENTITY" "$APP_PATH/Contents/MacOS/faceguard-desktop"
 
 # Sign the app bundle itself
 codesign --force --deep --options runtime --timestamp \

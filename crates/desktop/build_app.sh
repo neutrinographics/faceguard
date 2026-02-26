@@ -20,8 +20,8 @@ if [[ "${1:-}" == "--release" ]]; then
     CARGO_FLAGS="--release"
 fi
 
-echo "Building video-blur-desktop ($PROFILE) with static FFmpeg..."
-cargo build -p video-blur-desktop $CARGO_FLAGS --features static-ffmpeg
+echo "Building faceguard-desktop ($PROFILE) with static FFmpeg..."
+cargo build -p faceguard-desktop $CARGO_FLAGS --features static-ffmpeg
 
 echo "Creating app bundle..."
 rm -rf "$APP_DIR"
@@ -29,7 +29,7 @@ mkdir -p "$APP_DIR/Contents/MacOS"
 mkdir -p "$APP_DIR/Contents/Resources"
 mkdir -p "$FRAMEWORKS_DIR"
 
-BINARY="$WORKSPACE_DIR/target/$PROFILE/video-blur-desktop"
+BINARY="$WORKSPACE_DIR/target/$PROFILE/faceguard-desktop"
 
 # Copy binary
 cp "$BINARY" "$APP_DIR/Contents/MacOS/"
@@ -108,7 +108,7 @@ bundle_dylib() {
 }
 
 echo "Checking for non-system dylibs..."
-BINARY_IN_APP="$APP_DIR/Contents/MacOS/video-blur-desktop"
+BINARY_IN_APP="$APP_DIR/Contents/MacOS/faceguard-desktop"
 
 # Get direct dependencies of the binary
 DIRECT_DEPS="$(collect_dylibs "$BINARY_IN_APP")"

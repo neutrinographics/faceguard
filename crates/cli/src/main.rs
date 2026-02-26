@@ -4,34 +4,34 @@ use std::process;
 
 use clap::Parser;
 
-use video_blur_core::blurring::domain::frame_blurrer::FrameBlurrer;
-use video_blur_core::blurring::infrastructure::blurrer_factory::{create_blurrer, BlurShape};
-use video_blur_core::detection::domain::face_detector::FaceDetector;
-use video_blur_core::detection::domain::face_region_builder::{FaceRegionBuilder, DEFAULT_PADDING};
-use video_blur_core::detection::domain::region_merger::RegionMerger;
-use video_blur_core::detection::domain::region_smoother::{RegionSmoother, DEFAULT_ALPHA};
-use video_blur_core::detection::infrastructure::bytetrack_tracker::ByteTracker;
-use video_blur_core::detection::infrastructure::model_resolver;
-use video_blur_core::detection::infrastructure::onnx_yolo_detector::OnnxYoloDetector;
-use video_blur_core::detection::infrastructure::skip_frame_detector::SkipFrameDetector;
-use video_blur_core::pipeline::blur_faces_use_case::BlurFacesUseCase;
-use video_blur_core::pipeline::blur_image_use_case::BlurImageUseCase;
-use video_blur_core::pipeline::infrastructure::threaded_pipeline_executor::ThreadedPipelineExecutor;
-use video_blur_core::pipeline::preview_faces_use_case::PreviewFacesUseCase;
-use video_blur_core::shared::constants::{
+use faceguard_core::blurring::domain::frame_blurrer::FrameBlurrer;
+use faceguard_core::blurring::infrastructure::blurrer_factory::{create_blurrer, BlurShape};
+use faceguard_core::detection::domain::face_detector::FaceDetector;
+use faceguard_core::detection::domain::face_region_builder::{FaceRegionBuilder, DEFAULT_PADDING};
+use faceguard_core::detection::domain::region_merger::RegionMerger;
+use faceguard_core::detection::domain::region_smoother::{RegionSmoother, DEFAULT_ALPHA};
+use faceguard_core::detection::infrastructure::bytetrack_tracker::ByteTracker;
+use faceguard_core::detection::infrastructure::model_resolver;
+use faceguard_core::detection::infrastructure::onnx_yolo_detector::OnnxYoloDetector;
+use faceguard_core::detection::infrastructure::skip_frame_detector::SkipFrameDetector;
+use faceguard_core::pipeline::blur_faces_use_case::BlurFacesUseCase;
+use faceguard_core::pipeline::blur_image_use_case::BlurImageUseCase;
+use faceguard_core::pipeline::infrastructure::threaded_pipeline_executor::ThreadedPipelineExecutor;
+use faceguard_core::pipeline::preview_faces_use_case::PreviewFacesUseCase;
+use faceguard_core::shared::constants::{
     IMAGE_EXTENSIONS, TRACKER_MAX_LOST, YOLO_MODEL_NAME, YOLO_MODEL_URL,
 };
-use video_blur_core::video::domain::image_writer::ImageWriter;
-use video_blur_core::video::domain::video_reader::VideoReader;
-use video_blur_core::video::domain::video_writer::VideoWriter;
-use video_blur_core::video::infrastructure::ffmpeg_reader::FfmpegReader;
-use video_blur_core::video::infrastructure::ffmpeg_writer::FfmpegWriter;
-use video_blur_core::video::infrastructure::image_file_reader::ImageFileReader;
-use video_blur_core::video::infrastructure::image_file_writer::ImageFileWriter;
+use faceguard_core::video::domain::image_writer::ImageWriter;
+use faceguard_core::video::domain::video_reader::VideoReader;
+use faceguard_core::video::domain::video_writer::VideoWriter;
+use faceguard_core::video::infrastructure::ffmpeg_reader::FfmpegReader;
+use faceguard_core::video::infrastructure::ffmpeg_writer::FfmpegWriter;
+use faceguard_core::video::infrastructure::image_file_reader::ImageFileReader;
+use faceguard_core::video::infrastructure::image_file_writer::ImageFileWriter;
 
 /// Face detection and blurring for videos and images.
 #[derive(Parser)]
-#[command(name = "video-blur")]
+#[command(name = "faceguard")]
 struct Cli {
     /// Input video or image file.
     input: PathBuf,

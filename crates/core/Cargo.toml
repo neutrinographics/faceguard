@@ -1,5 +1,5 @@
 [package]
-name = "video-blur-core"
+name = "faceguard-core"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

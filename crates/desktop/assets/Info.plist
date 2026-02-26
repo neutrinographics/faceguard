@@ -15,7 +15,7 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleExecutable</key>
-    <string>video-blur-desktop</string>
+    <string>faceguard-desktop</string>
     <key>CFBundleIconFile</key>
     <string>VideoBlur.icns</string>
     <key>LSMinimumSystemVersion</key>

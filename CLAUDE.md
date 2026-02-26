@@ -16,18 +16,18 @@ This project strictly follows **Domain-Driven Design (DDD)**, **Clean Architectu
 This is a Cargo workspace with three crates:
 
 - **`crates/core`** — Core face detection and blurring library
-- **`crates/cli`** — CLI binary (`video-blur`)
-- **`crates/desktop`** — Desktop GUI binary (`video-blur-desktop`)
+- **`crates/cli`** — CLI binary (`faceguard`)
+- **`crates/desktop`** — Desktop GUI binary (`faceguard-desktop`)
 
 ## Build & Run Commands
 
 ```bash
 cargo build                                  # Build all crates
 cargo test                                   # Run all tests
-cargo test -p video-blur-core                # Run only core tests
-cargo test -p video-blur-core -- region      # Run tests matching "region"
-cargo run -p video-blur-cli -- input.mp4 output.mp4  # Run CLI
-cargo run -p video-blur-desktop              # Run desktop GUI
+cargo test -p faceguard-core                # Run only core tests
+cargo test -p faceguard-core -- region      # Run tests matching "region"
+cargo run -p faceguard-cli -- input.mp4 output.mp4  # Run CLI
+cargo run -p faceguard-desktop              # Run desktop GUI
 cargo clippy --all-targets                   # Lint
 cargo fmt --check                            # Check formatting
 ```
@@ -66,7 +66,7 @@ crates/
 
 **Dependency rule**: `infrastructure` depends on `domain`. `pipeline` (application) depends only on `domain` traits, never on `infrastructure`. `domain` depends on nothing external (ndarray is permitted).
 
-**Package boundary**: The desktop and CLI crates depend on core via `video-blur-core`. They import use cases and infrastructure implementations to wire them together.
+**Package boundary**: The desktop and CLI crates depend on core via `faceguard-core`. They import use cases and infrastructure implementations to wire them together.
 
 ## Code Conventions
 

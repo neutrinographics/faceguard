@@ -6,28 +6,28 @@ use std::thread;
 
 use crossbeam_channel::{Receiver, Sender};
 
-use video_blur_core::blurring::infrastructure::blurrer_factory;
-use video_blur_core::blurring::infrastructure::gpu_context::GpuContext;
-use video_blur_core::detection::domain::face_detector::FaceDetector;
-use video_blur_core::detection::domain::face_region_builder::{FaceRegionBuilder, DEFAULT_PADDING};
-use video_blur_core::detection::domain::region_merger::RegionMerger;
-use video_blur_core::detection::domain::region_smoother::{RegionSmoother, DEFAULT_ALPHA};
-use video_blur_core::detection::infrastructure::bytetrack_tracker::ByteTracker;
-use video_blur_core::detection::infrastructure::cached_face_detector::CachedFaceDetector;
-use video_blur_core::detection::infrastructure::onnx_yolo_detector::OnnxYoloDetector;
-use video_blur_core::detection::infrastructure::skip_frame_detector::SkipFrameDetector;
-use video_blur_core::pipeline::blur_faces_use_case::BlurFacesUseCase;
-use video_blur_core::pipeline::blur_image_use_case::BlurImageUseCase;
-use video_blur_core::pipeline::infrastructure::threaded_pipeline_executor::ThreadedPipelineExecutor;
-use video_blur_core::shared::constants::{IMAGE_EXTENSIONS, TRACKER_MAX_LOST};
-use video_blur_core::shared::region::Region;
-use video_blur_core::video::domain::image_writer::ImageWriter;
-use video_blur_core::video::domain::video_reader::VideoReader;
-use video_blur_core::video::domain::video_writer::VideoWriter;
-use video_blur_core::video::infrastructure::ffmpeg_reader::FfmpegReader;
-use video_blur_core::video::infrastructure::ffmpeg_writer::FfmpegWriter;
-use video_blur_core::video::infrastructure::image_file_reader::ImageFileReader;
-use video_blur_core::video::infrastructure::image_file_writer::ImageFileWriter;
+use faceguard_core::blurring::infrastructure::blurrer_factory;
+use faceguard_core::blurring::infrastructure::gpu_context::GpuContext;
+use faceguard_core::detection::domain::face_detector::FaceDetector;
+use faceguard_core::detection::domain::face_region_builder::{FaceRegionBuilder, DEFAULT_PADDING};
+use faceguard_core::detection::domain::region_merger::RegionMerger;
+use faceguard_core::detection::domain::region_smoother::{RegionSmoother, DEFAULT_ALPHA};
+use faceguard_core::detection::infrastructure::bytetrack_tracker::ByteTracker;
+use faceguard_core::detection::infrastructure::cached_face_detector::CachedFaceDetector;
+use faceguard_core::detection::infrastructure::onnx_yolo_detector::OnnxYoloDetector;
+use faceguard_core::detection::infrastructure::skip_frame_detector::SkipFrameDetector;
+use faceguard_core::pipeline::blur_faces_use_case::BlurFacesUseCase;
+use faceguard_core::pipeline::blur_image_use_case::BlurImageUseCase;
+use faceguard_core::pipeline::infrastructure::threaded_pipeline_executor::ThreadedPipelineExecutor;
+use faceguard_core::shared::constants::{IMAGE_EXTENSIONS, TRACKER_MAX_LOST};
+use faceguard_core::shared::region::Region;
+use faceguard_core::video::domain::image_writer::ImageWriter;
+use faceguard_core::video::domain::video_reader::VideoReader;
+use faceguard_core::video::domain::video_writer::VideoWriter;
+use faceguard_core::video::infrastructure::ffmpeg_reader::FfmpegReader;
+use faceguard_core::video::infrastructure::ffmpeg_writer::FfmpegWriter;
+use faceguard_core::video::infrastructure::image_file_reader::ImageFileReader;
+use faceguard_core::video::infrastructure::image_file_writer::ImageFileWriter;
 
 use super::model_cache::ModelCache;
 
@@ -149,7 +149,7 @@ fn build_detector(
 
 fn build_blurrer(
     params: &BlurParams,
-) -> Box<dyn video_blur_core::blurring::domain::frame_blurrer::FrameBlurrer> {
+) -> Box<dyn faceguard_core::blurring::domain::frame_blurrer::FrameBlurrer> {
     let blur_shape = match params.blur_shape {
         crate::settings::BlurShape::Ellipse => blurrer_factory::BlurShape::Elliptical,
         crate::settings::BlurShape::Rect => blurrer_factory::BlurShape::Rectangular,
@@ -165,7 +165,7 @@ fn blur_image(
     input: &std::path::Path,
     output: &std::path::Path,
     detector: Box<dyn FaceDetector>,
-    blurrer: Box<dyn video_blur_core::blurring::domain::frame_blurrer::FrameBlurrer>,
+    blurrer: Box<dyn faceguard_core::blurring::domain::frame_blurrer::FrameBlurrer>,
     params: &BlurParams,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let reader: Box<dyn VideoReader> = Box::new(ImageFileReader::new());
@@ -186,7 +186,7 @@ fn blur_video(
     input: &std::path::Path,
     output: &std::path::Path,
     detector: Box<dyn FaceDetector>,
-    blurrer: Box<dyn video_blur_core::blurring::domain::frame_blurrer::FrameBlurrer>,
+    blurrer: Box<dyn faceguard_core::blurring::domain::frame_blurrer::FrameBlurrer>,
     params: &BlurParams,
     tx: &Sender<WorkerMessage>,
     cancelled: &Arc<AtomicBool>,

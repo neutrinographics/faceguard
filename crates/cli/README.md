@@ -1,32 +1,32 @@
-# video-blur-cli
+# faceguard-cli
 
 Command-line interface for face detection and blurring in videos and images.
 
 ## Purpose
 
-Thin composition root that wires together `video-blur-core` domain traits with infrastructure implementations and exposes them via a clap-based CLI. Contains no business logic — all detection, blurring, and pipeline orchestration lives in the core crate.
+Thin composition root that wires together `faceguard-core` domain traits with infrastructure implementations and exposes them via a clap-based CLI. Contains no business logic — all detection, blurring, and pipeline orchestration lives in the core crate.
 
 ## Usage
 
 ```bash
 # Blur all faces in a video
-video-blur input.mp4 output.mp4
+faceguardinput.mp4 output.mp4
 
 # Blur all faces in an image
-video-blur photo.jpg blurred.jpg
+faceguardphoto.jpg blurred.jpg
 
 # Adjust detection and blur parameters
-video-blur input.mp4 output.mp4 --confidence 0.6 --blur-strength 151 --blur-shape rect
+faceguardinput.mp4 output.mp4 --confidence 0.6 --blur-strength 151 --blur-shape rect
 
 # Skip-frame detection for faster processing (detect every 3rd frame)
-video-blur input.mp4 output.mp4 --skip-frames 3
+faceguardinput.mp4 output.mp4 --skip-frames 3
 
 # Preview mode: scan for faces and save thumbnails
-video-blur input.mp4 --preview faces/
+faceguardinput.mp4 --preview faces/
 
 # Selective blurring after preview (filenames in faces/ are track IDs)
-video-blur input.mp4 output.mp4 --blur-ids 1,3
-video-blur input.mp4 output.mp4 --exclude-ids 2
+faceguardinput.mp4 output.mp4 --blur-ids 1,3
+faceguardinput.mp4 output.mp4 --exclude-ids 2
 ```
 
 ## Options
@@ -58,7 +58,7 @@ The CLI acts as the composition root, assembling the processing pipeline from co
 
 ONNX models are resolved automatically on first run via `model_resolver`. The resolution order is:
 
-1. User cache directory (`~/.cache/video-blur/` on Linux, `~/Library/Caches/video-blur/` on macOS)
+1. User cache directory (`~/.cache/FaceGuard/` on Linux, `~/Library/Caches/FaceGuard/` on macOS)
 2. Bundled path (for pre-packaged distributions)
 3. Download from GitHub releases (with progress reporting to stderr)
 

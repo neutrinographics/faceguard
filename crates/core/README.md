@@ -1,4 +1,4 @@
-# video-blur-core
+# faceguard-core
 
 Core library for face detection and blurring in video and image files.
 
@@ -117,9 +117,9 @@ Two strategies for grouping detections that belong to the same person across a v
 ## Testing
 
 ```bash
-cargo test -p video-blur-core                # All tests
-cargo test -p video-blur-core -- region      # Tests matching "region"
-cargo test -p video-blur-core -- --ignored   # Infrastructure tests requiring models/network
+cargo test -p faceguard-core                # All tests
+cargo test -p faceguard-core -- region      # Tests matching "region"
+cargo test -p faceguard-core -- --ignored   # Infrastructure tests requiring models/network
 ```
 
 Domain tests use stub/fake trait implementations for isolation. Infrastructure tests that require ONNX models or network access are marked `#[ignore]`. `rstest` is used for parameterized tests and `approx` for float comparisons.

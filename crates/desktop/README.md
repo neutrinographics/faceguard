@@ -1,10 +1,10 @@
-# video-blur-desktop
+# faceguard-desktop
 
 Desktop GUI for face detection and blurring in videos and images, built with [iced](https://iced.rs/).
 
 ## Purpose
 
-Composition root that wires together `video-blur-core` domain traits with infrastructure implementations and exposes them through an iced-based graphical interface. Contains no business logic — all detection, blurring, and pipeline orchestration lives in the core crate. The desktop crate handles UI state management, background worker coordination, and user interaction.
+Composition root that wires together `faceguard-core` domain traits with infrastructure implementations and exposes them through an iced-based graphical interface. Contains no business logic — all detection, blurring, and pipeline orchestration lives in the core crate. The desktop crate handles UI state management, background worker coordination, and user interaction.
 
 ## Architecture
 
@@ -70,8 +70,8 @@ Workers communicate results back to the UI thread via `crossbeam-channel` sender
 ## Settings Persistence
 
 User preferences are stored as JSON in the platform config directory:
-- macOS: `~/Library/Application Support/video-blur/settings.json`
-- Linux: `~/.config/video-blur/settings.json`
+- macOS: `~/Library/Application Support/FaceGuard/settings.json`
+- Linux: `~/.config/FaceGuard/settings.json`
 
 Configurable options: blur shape (ellipse/rect), blur intensity, detection sensitivity, lookahead frames, appearance (system/dark/light), high contrast mode, and font scale.
 

@@ -1,5 +1,5 @@
 [package]
-name = "video-blur-desktop"
+name = "faceguard-desktop"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,14 +7,14 @@ license.workspace = true
 description = "Desktop GUI for face blurring in videos and images"
 
 [[bin]]
-name = "video-blur-desktop"
+name = "faceguard-desktop"
 path = "src/main.rs"
 
 [features]
-static-ffmpeg = ["video-blur-core/static-ffmpeg"]
+static-ffmpeg = ["faceguard-core/static-ffmpeg"]
 
 [dependencies]
-video-blur-core = { workspace = true }
+faceguard-core = { workspace = true }
 iced = { workspace = true }
 iced_anim = { workspace = true }
 rfd = { workspace = true }

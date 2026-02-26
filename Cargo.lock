@@ -1287,6 +1287,57 @@ dependencies = [
 ]
 
 [[package]]
+name = "faceguard-cli"
+version = "0.2.0"
+dependencies = [
+ "clap",
+ "env_logger",
+ "faceguard-core",
+ "log",
+]
+
+[[package]]
+name = "faceguard-core"
+version = "0.2.0"
+dependencies = [
+ "approx",
+ "bytemuck",
+ "crossbeam-channel",
+ "dirs",
+ "ffmpeg-next",
+ "image",
+ "log",
+ "ndarray",
+ "ort",
+ "pollster",
+ "reqwest",
+ "rstest",
+ "tempfile",
+ "thiserror 2.0.18",
+ "wgpu 24.0.5",
+]
+
+[[package]]
+name = "faceguard-desktop"
+version = "0.2.0"
+dependencies = [
+ "crossbeam-channel",
+ "dirs",
+ "env_logger",
+ "faceguard-core",
+ "iced",
+ "iced_anim",
+ "image",
+ "log",
+ "open",
+ "ort",
+ "rfd",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5373,57 +5424,6 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
-name = "video-blur-cli"
-version = "0.2.0"
-dependencies = [
- "clap",
- "env_logger",
- "log",
- "video-blur-core",
-]
-
-[[package]]
-name = "video-blur-core"
-version = "0.2.0"
-dependencies = [
- "approx",
- "bytemuck",
- "crossbeam-channel",
- "dirs",
- "ffmpeg-next",
- "image",
- "log",
- "ndarray",
- "ort",
- "pollster",
- "reqwest",
- "rstest",
- "tempfile",
- "thiserror 2.0.18",
- "wgpu 24.0.5",
-]
-
-[[package]]
-name = "video-blur-desktop"
-version = "0.2.0"
-dependencies = [
- "crossbeam-channel",
- "dirs",
- "env_logger",
- "iced",
- "iced_anim",
- "image",
- "log",
- "open",
- "ort",
- "rfd",
- "serde",
- "serde_json",
- "tempfile",
- "video-blur-core",
-]
 
 [[package]]
 name = "walkdir"

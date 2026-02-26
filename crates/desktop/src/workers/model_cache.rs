@@ -4,9 +4,9 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use video_blur_core::detection::infrastructure::model_resolver;
-use video_blur_core::detection::infrastructure::onnx_yolo_detector;
-use video_blur_core::shared::constants::{
+use faceguard_core::detection::infrastructure::model_resolver;
+use faceguard_core::detection::infrastructure::onnx_yolo_detector;
+use faceguard_core::shared::constants::{
     EMBEDDING_MODEL_NAME, EMBEDDING_MODEL_URL, YOLO_MODEL_NAME, YOLO_MODEL_URL,
 };
 

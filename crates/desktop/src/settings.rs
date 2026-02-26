@@ -58,7 +58,7 @@ pub struct Settings {
 }
 
 fn default_quality() -> u32 {
-    crf_to_quality(video_blur_core::video::infrastructure::ffmpeg_writer::DEFAULT_CRF)
+    crf_to_quality(faceguard_core::video::infrastructure::ffmpeg_writer::DEFAULT_CRF)
 }
 
 pub fn quality_to_crf(quality: u32) -> u32 {

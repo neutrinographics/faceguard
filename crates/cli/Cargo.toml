@@ -1,5 +1,5 @@
 [package]
-name = "video-blur-cli"
+name = "faceguard-cli"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,14 +7,14 @@ license.workspace = true
 description = "CLI for face blurring in videos and images"
 
 [[bin]]
-name = "video-blur"
+name = "faceguard"
 path = "src/main.rs"
 
 [features]
-static-ffmpeg = ["video-blur-core/static-ffmpeg"]
+static-ffmpeg = ["faceguard-core/static-ffmpeg"]
 
 [dependencies]
-video-blur-core = { workspace = true }
+faceguard-core = { workspace = true }
 clap = { workspace = true }
 env_logger = { workspace = true }
 log = { workspace = true }

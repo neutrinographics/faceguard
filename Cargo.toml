@@ -13,7 +13,7 @@ rust-version = "1.75"
 license = "MIT"
 
 [workspace.dependencies]
-video-blur-core = { path = "crates/core" }
+faceguard-core = { path = "crates/core" }
 ndarray = "0.17"
 thiserror = "2"
 rstest = "0.23"

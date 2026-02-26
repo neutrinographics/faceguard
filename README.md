@@ -26,7 +26,7 @@ Automatic face detection and blurring for videos and images. Detects faces using
     - macOS: `brew install x264`
     - Ubuntu/Debian: `apt install libx264-dev`
 
-ONNX models are downloaded automatically on first run to `~/.cache/video-blur/`.
+ONNX models are downloaded automatically on first run to `~/.cache/FaceGuard/`.
 
 ### Build
 
@@ -38,30 +38,30 @@ cargo build --release
 
 **Blur all faces in a video:**
 ```bash
-cargo run -p video-blur-cli --release -- input.mp4 output.mp4
+cargo run -p faceguard-cli --release -- input.mp4 output.mp4
 ```
 
 **Blur all faces in an image:**
 ```bash
-cargo run -p video-blur-cli --release -- photo.jpg blurred.jpg
+cargo run -p faceguard-cli --release -- photo.jpg blurred.jpg
 ```
 
 **Preview faces first, then selectively blur:**
 ```bash
 # Step 1: Scan and save face thumbnails
-cargo run -p video-blur-cli --release -- input.mp4 --preview faces/
+cargo run -p faceguard-cli --release -- input.mp4 --preview faces/
 
 # Step 2: Review thumbnails in faces/ — filenames are track IDs
 # Step 3: Blur only specific faces
-cargo run -p video-blur-cli --release -- input.mp4 output.mp4 --blur-ids 1,3
+cargo run -p faceguard-cli --release -- input.mp4 output.mp4 --blur-ids 1,3
 
 # Or blur everyone except specific faces
-cargo run -p video-blur-cli --release -- input.mp4 output.mp4 --exclude-ids 2
+cargo run -p faceguard-cli --release -- input.mp4 output.mp4 --exclude-ids 2
 ```
 
 **Launch the desktop GUI:**
 ```bash
-cargo run -p video-blur-desktop --release
+cargo run -p faceguard-desktop --release
 ```
 
 ### CLI Options
@@ -83,8 +83,8 @@ cargo run -p video-blur-desktop --release
 ```
 crates/
 ├── core/       Core library: detection, blurring, video I/O, pipeline orchestration
-├── cli/        CLI binary (video-blur)
-└── desktop/    Desktop GUI binary (video-blur-desktop)
+├── cli/        CLI binary (faceguard)
+└── desktop/    Desktop GUI binary (faceguard-desktop)
 ```
 
 The core crate is organized by feature slice (detection, blurring, video, pipeline), each with domain and infrastructure layers following Clean Architecture. See [`crates/core/README.md`](crates/core/README.md) for detailed architecture documentation.
@@ -104,7 +104,7 @@ In video mode, these stages run on dedicated threads connected by bounded channe
 
 ```bash
 cargo test                       # Run all tests
-cargo test -p video-blur-core    # Core library tests only
+cargo test -p faceguard-core    # Core library tests only
 cargo clippy --all-targets       # Lint
 cargo fmt --check                # Check formatting
 ```

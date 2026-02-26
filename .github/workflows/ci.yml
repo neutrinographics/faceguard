@@ -51,16 +51,16 @@ jobs:
         include:
           - os: macos-latest
             target: aarch64-apple-darwin
-            artifact: video-blur-desktop
+            artifact: faceguard-desktop
           - os: macos-latest
             target: x86_64-apple-darwin
-            artifact: video-blur-desktop
+            artifact: faceguard-desktop
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact: video-blur-desktop
+            artifact: faceguard-desktop
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: video-blur-desktop.exe
+            artifact: faceguard-desktop.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -84,7 +84,7 @@ jobs:
         run: choco install nasm
 
       - name: Build release (static FFmpeg)
-        run: cargo build --release --target ${{ matrix.target }} -p video-blur-desktop --features static-ffmpeg
+        run: cargo build --release --target ${{ matrix.target }} -p faceguard-desktop --features static-ffmpeg
 
       - name: Create macOS app bundle
         if: runner.os == 'macOS' && matrix.target == 'aarch64-apple-darwin'
@@ -93,12 +93,12 @@ jobs:
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: video-blur-desktop-${{ matrix.target }}
+          name: faceguard-desktop-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/${{ matrix.artifact }}
 
       - name: Upload macOS app bundle
         if: runner.os == 'macOS' && matrix.target == 'aarch64-apple-darwin'
         uses: actions/upload-artifact@v4
         with:
-          name: Video-Blur-macOS-app
-          path: target/bundle/Video Blur.app
+          name: FaceGuard-macOS-app
+          path: target/bundle/FaceGuard.app
