@@ -90,13 +90,11 @@ fn build_button<'a, Message: Clone + 'a>(
         });
 
     let rise = hover_amount * FLOAT_HEIGHT;
-    let shadow_pad = SHADOW_BLUR_HOVER + SHADOW_OFFSET_Y_HOVER;
     container(btn)
         .padding(Padding {
-            top: shadow_pad + FLOAT_HEIGHT - rise,
-            bottom: shadow_pad + rise,
-            left: shadow_pad,
-            right: shadow_pad,
+            top: FLOAT_HEIGHT - rise,
+            bottom: rise,
+            ..Padding::ZERO
         })
         .into()
 }
