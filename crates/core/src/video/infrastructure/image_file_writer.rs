@@ -101,8 +101,13 @@ mod tests {
     fn test_write_invalid_path_returns_error() {
         let frame = make_frame(10, 10, 0, 0, 0);
         let writer = ImageFileWriter::new();
-        assert!(writer
-            .write(Path::new("/nonexistent/dir/out.png"), &frame, None)
-            .is_err());
+        // Use a path under a non-existent drive letter on Windows, and a
+        // non-existent deep path on Unix, to guarantee the write fails.
+        let bad_path = if cfg!(windows) {
+            Path::new("Z:\\nonexistent\\dir\\out.png")
+        } else {
+            Path::new("/nonexistent/dir/out.png")
+        };
+        assert!(writer.write(bad_path, &frame, None).is_err());
     }
 }
