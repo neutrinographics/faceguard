@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use iced::widget::{button, column, container, progress_bar, row, text, Space};
+use iced::widget::{button, column, container, progress_bar, row, svg, text, Space};
 use iced::{Element, Length, Theme};
 
 use crate::app::{scaled, Message, ProcessingState};
@@ -62,11 +62,6 @@ fn complete_state<'a>(
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
 
-    let success_color = iced::Color::from_rgb(
-        0x2E as f32 / 255.0,
-        0x8B as f32 / 255.0,
-        0x57 as f32 / 255.0,
-    );
     let success_bg = if is_dark_theme(theme) {
         iced::Color::from_rgba(
             0x2E as f32 / 255.0,
@@ -82,27 +77,51 @@ fn complete_state<'a>(
         )
     };
 
-    let check_icon = container(
-        text("\u{2713}")
-            .size(scaled(28.0, fs))
-            .color(success_color)
-            .align_x(iced::Alignment::Center),
-    )
-    .width(64)
-    .height(64)
-    .center_x(64)
-    .center_y(64)
-    .style(move |_theme: &Theme| container::Style {
-        background: Some(success_bg.into()),
-        border: iced::border::Border {
-            radius: 32.0.into(),
-            ..iced::border::Border::default()
-        },
-        ..container::Style::default()
-    });
+    let check_svg = svg(svg::Handle::from_memory(
+        include_bytes!("../../assets/check.svg").as_slice(),
+    ))
+    .width(28)
+    .height(28);
+
+    let check_icon = container(check_svg)
+        .width(64)
+        .height(64)
+        .center_x(64)
+        .center_y(64)
+        .style(move |_theme: &Theme| container::Style {
+            background: Some(success_bg.into()),
+            border: iced::border::Border {
+                radius: 32.0.into(),
+                ..iced::border::Border::default()
+            },
+            ..container::Style::default()
+        });
 
     let show_btn = primary_button::primary_button_fill(
-        move || text("Show in Folder").size(scaled(15.0, fs)).font(iced::Font { weight: iced::font::Weight::Semibold, ..iced::Font::DEFAULT }).width(Length::Fill).center().into(),
+        move || {
+            let folder_icon = svg(svg::Handle::from_memory(
+                include_bytes!("../../assets/folder.svg").as_slice(),
+            ))
+            .width(16)
+            .height(16);
+
+            container(
+                row![
+                    folder_icon,
+                    text("Show in Folder")
+                        .size(scaled(15.0, fs))
+                        .font(iced::Font {
+                            weight: iced::font::Weight::Semibold,
+                            ..iced::Font::DEFAULT
+                        }),
+                ]
+                .spacing(8)
+                .align_y(iced::Alignment::Center),
+            )
+            .width(Length::Fill)
+            .center_x(Length::Fill)
+            .into()
+        },
         Message::ShowInFolder,
         show_folder_hovered,
         Message::ShowFolderHover,

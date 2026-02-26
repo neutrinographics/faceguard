@@ -1,4 +1,4 @@
-use iced::widget::{column, container, mouse_area, row, text, Space};
+use iced::widget::{column, container, mouse_area, row, svg, text, Space};
 use iced::{Color, Element, Length, Theme};
 
 use crate::app::{scaled, Message};
@@ -57,32 +57,39 @@ fn build_inner(
     accent: Color,
     browse_hovered: bool,
 ) -> Element<'static, Message> {
-    let icon_circle = container(
-        text("\u{2B06}")
-            .size(scaled(22.0, fs))
-            .align_x(iced::Alignment::Center)
-            .align_y(iced::Alignment::Center),
-    )
-    .width(scaled(56.0, fs))
-    .height(scaled(56.0, fs))
-    .center_x(Length::Shrink)
-    .center_y(Length::Shrink)
-    .style(move |_theme: &Theme| {
-        container::Style {
+    let upload_icon = svg(svg::Handle::from_memory(
+        include_bytes!("../../assets/upload.svg").as_slice(),
+    ))
+    .width(24)
+    .height(24)
+    .style(move |_theme: &Theme, _status| svg::Style {
+        color: Some(accent),
+    });
+
+    let icon_circle = container(upload_icon)
+        .width(scaled(56.0, fs))
+        .height(scaled(56.0, fs))
+        .center_x(scaled(56.0, fs))
+        .center_y(scaled(56.0, fs))
+        .style(move |_theme: &Theme| container::Style {
             background: Some(iced::Background::Color(Color { a: 0.12, ..accent })),
             border: iced::border::Border {
                 radius: 100.0.into(),
                 ..iced::border::Border::default()
             },
-            text_color: Some(accent),
             ..container::Style::default()
-        }
-    });
+        });
 
     let browse_btn = primary_button::primary_button(
         move || {
+            let folder_icon = svg(svg::Handle::from_memory(
+                include_bytes!("../../assets/folder.svg").as_slice(),
+            ))
+            .width(16)
+            .height(16);
+
             row![
-                text("\u{1F4C2}").size(scaled(14.0, fs)),
+                folder_icon,
                 text("Browse Files")
                     .size(scaled(14.0, fs))
                     .color(Color::WHITE)
