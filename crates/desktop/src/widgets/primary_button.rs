@@ -8,7 +8,7 @@ use iced_anim::AnimationBuilder;
 
 const HOVER_DARKEN: f32 = 0.05;
 const FLOAT_HEIGHT: f32 = 1.5;
-const CORNER_RADIUS: f32 = 8.0;
+const CORNER_RADIUS: f32 = 10.0;
 const ANIMATION_DURATION: Duration = Duration::from_millis(200);
 
 pub fn primary_button<'a, Message: Clone + 'a>(
@@ -18,7 +18,14 @@ pub fn primary_button<'a, Message: Clone + 'a>(
     on_hover: impl Fn(bool) -> Message + 'a,
     padding: [u16; 2],
 ) -> Element<'a, Message> {
-    primary_button_with_width(content, on_press, hovered, on_hover, padding, Length::Shrink)
+    primary_button_with_width(
+        content,
+        on_press,
+        hovered,
+        on_hover,
+        padding,
+        Length::Shrink,
+    )
 }
 
 pub fn primary_button_fill<'a, Message: Clone + 'a>(
