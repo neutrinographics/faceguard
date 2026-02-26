@@ -29,10 +29,10 @@ jobs:
       - name: Install FFmpeg (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install ffmpeg pkg-config
-          FFMPEG_PREFIX=$(brew --prefix ffmpeg)
-          echo "FFMPEG_DIR=${FFMPEG_PREFIX}" >> $GITHUB_ENV
-          echo "BINDGEN_EXTRA_CLANG_ARGS=-I${FFMPEG_PREFIX}/include" >> $GITHUB_ENV
+          brew install ffmpeg@7 pkg-config
+          brew link ffmpeg@7
+          FFMPEG_PREFIX=$(brew --prefix ffmpeg@7)
+          echo "PKG_CONFIG_PATH=${FFMPEG_PREFIX}/lib/pkgconfig" >> $GITHUB_ENV
 
       - name: Install FFmpeg (Windows)
         if: runner.os == 'Windows'
