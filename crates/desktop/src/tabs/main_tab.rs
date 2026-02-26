@@ -110,11 +110,11 @@ fn complete_state<'a>(
     );
 
     let another_btn = secondary_button::secondary_button_fill(
-        move || text("Blur Another File").size(scaled(14.0, fs)).font(iced::Font { weight: iced::font::Weight::Semibold, ..iced::Font::DEFAULT }).center().into(),
+        move || text("Blur Another File").size(scaled(15.0, fs)).font(iced::Font { weight: iced::font::Weight::Semibold, ..iced::Font::DEFAULT }).center().into(),
         Message::StartOver,
         blur_another_hovered,
         Message::BlurAnotherHover,
-        [14, 20],
+        [14, 24],
     );
 
     centered(

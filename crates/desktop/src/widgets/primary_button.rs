@@ -9,7 +9,7 @@ use iced_anim::AnimationBuilder;
 const HOVER_DARKEN: f32 = 0.05;
 const FLOAT_HEIGHT: f32 = 1.0;
 const CORNER_RADIUS: f32 = 10.0;
-const SHADOW_BLUR_BASE: f32 = 10.0;
+const SHADOW_BLUR_BASE: f32 = 8.0;
 const SHADOW_BLUR_HOVER: f32 = 15.0;
 const SHADOW_OFFSET_Y_BASE: f32 = 3.0;
 const SHADOW_OFFSET_Y_HOVER: f32 = 3.0;
