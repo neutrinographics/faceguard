@@ -71,6 +71,7 @@ fn setting_card<'a>(
         .into()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn blur_section<'a>(
     settings: &Settings,
     fs: f32,
@@ -245,6 +246,7 @@ fn blur_section<'a>(
     .into()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn detection_section<'a>(
     settings: &Settings,
     fs: f32,

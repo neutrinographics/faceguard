@@ -11,6 +11,7 @@ use crate::widgets::file_row;
 use crate::widgets::primary_button;
 use crate::widgets::secondary_button;
 
+#[allow(clippy::too_many_arguments)]
 pub fn view<'a>(
     fs: f32,
     input_path: Option<&Path>,
@@ -226,6 +227,7 @@ fn error_state<'a>(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn workflow_view<'a>(
     fs: f32,
     input_path: Option<&Path>,

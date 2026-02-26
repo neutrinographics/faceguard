@@ -24,6 +24,7 @@ pub const FULL_CARD_SIZE: f32 = 109.0;
 /// Image size at rest. Leaves room for border + padding on each side.
 const IMG_SIZE: f32 = FULL_CARD_SIZE - BORDER_WIDTH * 4.0;
 
+#[allow(clippy::too_many_arguments)]
 pub fn face_card<'a>(
     path: &Path,
     selected: bool,
@@ -72,6 +73,7 @@ pub fn face_card<'a>(
     outer.into()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_card<'a>(
     path: &PathBuf,
     selected: bool,
