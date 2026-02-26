@@ -4,12 +4,12 @@ use iced::widget::{button, column, container, progress_bar, row, svg, text, Spac
 use iced::{Element, Length, Theme};
 
 use crate::app::{scaled, Message, ProcessingState};
+use crate::theme::{muted_color, tertiary_color};
 use crate::widgets::drop_zone;
+use crate::widgets::faces_well::{self, FacesWellState};
 use crate::widgets::file_row;
 use crate::widgets::primary_button;
 use crate::widgets::secondary_button;
-use crate::theme::{muted_color, tertiary_color};
-use crate::widgets::faces_well::{self, FacesWellState};
 
 pub fn view<'a>(
     fs: f32,
@@ -38,14 +38,36 @@ pub fn view<'a>(
     }
 
     if let ProcessingState::Complete = processing {
-        return complete_state(fs, muted, tertiary, output_path, theme, show_folder_hovered, blur_another_hovered);
+        return complete_state(
+            fs,
+            muted,
+            tertiary,
+            output_path,
+            theme,
+            show_folder_hovered,
+            blur_another_hovered,
+        );
     }
 
     if let ProcessingState::Error(ref e) = processing {
         return error_state(fs, muted, tertiary, e);
     }
 
-    workflow_view(fs, input_path, output_path, processing, faces_well, theme, blur_button_hovered, change_input_hovered, change_output_hovered, choose_faces_hovered, cancel_hovered, rescan_hovered, face_card_hovered)
+    workflow_view(
+        fs,
+        input_path,
+        output_path,
+        processing,
+        faces_well,
+        theme,
+        blur_button_hovered,
+        change_input_hovered,
+        change_output_hovered,
+        choose_faces_hovered,
+        cancel_hovered,
+        rescan_hovered,
+        face_card_hovered,
+    )
 }
 
 fn complete_state<'a>(
@@ -129,7 +151,17 @@ fn complete_state<'a>(
     );
 
     let another_btn = secondary_button::secondary_button_fill(
-        move || text("Blur Another File").size(scaled(15.0, fs)).font(iced::Font { weight: iced::font::Weight::Semibold, ..iced::Font::DEFAULT }).width(Length::Fill).center().into(),
+        move || {
+            text("Blur Another File")
+                .size(scaled(15.0, fs))
+                .font(iced::Font {
+                    weight: iced::font::Weight::Semibold,
+                    ..iced::Font::DEFAULT
+                })
+                .width(Length::Fill)
+                .center()
+                .into()
+        },
         Message::StartOver,
         blur_another_hovered,
         Message::BlurAnotherHover,
@@ -140,7 +172,13 @@ fn complete_state<'a>(
         column![
             check_icon,
             Space::new().height(20),
-            text("All done!").size(scaled(20.0, fs)).font(iced::Font { weight: iced::font::Weight::Semibold, ..iced::Font::DEFAULT }).center(),
+            text("All done!")
+                .size(scaled(20.0, fs))
+                .font(iced::Font {
+                    weight: iced::font::Weight::Semibold,
+                    ..iced::Font::DEFAULT
+                })
+                .center(),
             Space::new().height(6),
             text(format!("Saved as {filename}"))
                 .size(scaled(14.0, fs))
@@ -275,10 +313,8 @@ fn workflow_view<'a>(
                 Message::BlurButtonHover,
                 [14, 24],
             );
-            col = col
-                .push(blur_btn)
-                .push(Space::new().height(10))
-                .push(secondary_button::secondary_button_fill(
+            col = col.push(blur_btn).push(Space::new().height(10)).push(
+                secondary_button::secondary_button_fill(
                     move || {
                         text("Choose Specific Faces\u{2026}")
                             .size(scaled(14.0, fs))
@@ -294,7 +330,8 @@ fn workflow_view<'a>(
                     choose_faces_hovered,
                     Message::ChooseFacesHover,
                     [14, 20],
-                ));
+                ),
+            );
         }
         ProcessingState::Preparing => {
             col = col.push(progress_with_cancel(
@@ -309,11 +346,21 @@ fn workflow_view<'a>(
         ProcessingState::Downloading(downloaded, total) => {
             let status = if *total > 0 {
                 let pct = (*downloaded as f64 / *total as f64 * 100.0) as u32;
-                format!("Downloading model \u{2014} {pct}%")
+                format!("Downloading face detection model \u{2014} {pct}%")
             } else {
-                format!("Downloading model\u{2026} {} bytes", downloaded)
+                format!(
+                    "Downloading face detection model\u{2026} {} bytes",
+                    downloaded
+                )
             };
-            col = col.push(progress_with_cancel(fs, muted, tertiary, &status, None, cancel_hovered));
+            col = col.push(progress_with_cancel(
+                fs,
+                muted,
+                tertiary,
+                &status,
+                None,
+                cancel_hovered,
+            ));
         }
         ProcessingState::Scanning(current, total) => {
             let (status, detail, pct) = frame_progress("Scanning", *current, *total);
@@ -476,8 +523,9 @@ fn styled_progress_bar(pct: f32) -> Element<'static, Message> {
         .girth(8.0)
         .style(|theme: &Theme| {
             let palette = theme.palette();
-            let luma =
-                palette.background.r * 0.299 + palette.background.g * 0.587 + palette.background.b * 0.114;
+            let luma = palette.background.r * 0.299
+                + palette.background.g * 0.587
+                + palette.background.b * 0.114;
             let track_bg = if luma > 0.5 {
                 iced::Color::from_rgb(
                     0xF0 as f32 / 255.0,
@@ -533,4 +581,3 @@ fn is_dark_theme(theme: &Theme) -> bool {
     let luma = p.background.r * 0.299 + p.background.g * 0.587 + p.background.b * 0.114;
     luma <= 0.5
 }
-

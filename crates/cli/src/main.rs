@@ -314,8 +314,8 @@ fn to_id_set(ids: Option<Vec<u32>>) -> Option<HashSet<u32>> {
 fn download_progress(downloaded: u64, total: u64) {
     if total > 0 {
         let pct = (downloaded as f64 / total as f64 * 100.0) as u32;
-        eprint!("\rDownloading model... {pct}%");
+        eprint!("\rDownloading face detection model... {pct}%");
     } else {
-        eprint!("\rDownloading model... {downloaded} bytes");
+        eprint!("\rDownloading face detection model... {downloaded} bytes");
     }
 }
