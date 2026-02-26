@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use iced::widget::{button, container, image, mouse_area, row, stack, text, Space};
-use iced::{Color, Element, Length, Padding, Theme};
+use iced::{Color, Element, Length, Theme};
 use iced_anim::transition::Easing;
 use iced_anim::AnimationBuilder;
 
@@ -14,7 +14,7 @@ const BORDER_WIDTH: f32 = 2.5;
 const BADGE_RADIUS: f32 = 10.0;
 const CHECK_SIZE: f32 = 20.0;
 const SCALE_GROW: f32 = 3.0;
-const ANIMATION_DURATION: Duration = Duration::from_millis(200);
+const ANIMATION_DURATION: Duration = Duration::from_millis(350);
 
 /// The outer size each card occupies in the grid (fixed, never changes with hover).
 pub const FULL_CARD_SIZE: f32 = CARD_SIZE + BORDER_WIDTH * 2.0;
@@ -48,14 +48,23 @@ pub fn face_card<'a>(
             fs,
         )
     })
-    .animates_layout(false)
+    .animates_layout(true)
     .animation(Easing::EASE_OUT.with_duration(ANIMATION_DURATION))
     .into();
 
-    mouse_area(animated)
-        .on_enter(Message::FaceCardHover(card_id, true))
-        .on_exit(Message::FaceCardHover(card_id, false))
-        .into()
+    // Fixed-size outer container establishes grid footprint.
+    // The animated card inside can overflow visually when hovered.
+    let outer = container(
+        mouse_area(animated)
+            .on_enter(Message::FaceCardHover(card_id, true))
+            .on_exit(Message::FaceCardHover(card_id, false)),
+    )
+    .width(FULL_CARD_SIZE)
+    .height(FULL_CARD_SIZE)
+    .center_x(FULL_CARD_SIZE)
+    .center_y(FULL_CARD_SIZE);
+
+    outer.into()
 }
 
 fn build_card<'a>(
@@ -71,9 +80,11 @@ fn build_card<'a>(
     let grow = SCALE_GROW * hover_amount;
     let card_size = CARD_SIZE + grow * 2.0;
 
+    let inner_radius = (CORNER_RADIUS - BORDER_WIDTH).max(0.0);
     let img = image(image::Handle::from_path(path))
         .width(card_size)
-        .height(card_size);
+        .height(card_size)
+        .border_radius(inner_radius);
 
     // Build overlay elements
     let mut items: Vec<Element<'a, Message>> = Vec::new();
@@ -146,48 +157,27 @@ fn build_card<'a>(
         }
     };
 
-    // Inner radius for content clipping (outer radius minus border width)
-    let inner_radius = (CORNER_RADIUS - BORDER_WIDTH).max(0.0);
-
-    // Clip the stack content to rounded corners
-    let clipped_content = container(card_stack)
-        .clip(true)
-        .style(move |_theme: &Theme| container::Style {
-            border: iced::border::Border {
-                radius: inner_radius.into(),
-                ..iced::border::Border::default()
-            },
-            ..container::Style::default()
-        });
-
-    let btn = button(clipped_content)
+    // Styled container provides the visible border, radius, and background.
+    // The button inside is fully transparent — just for click handling.
+    let btn = button(card_stack)
         .on_press(on_press.clone())
         .padding(0)
-        .style(move |_theme: &Theme, _status: button::Status| button::Style {
+        .style(|_theme: &Theme, _status: button::Status| button::Style {
+            background: None,
+            border: iced::border::Border::default(),
+            ..button::Style::default()
+        });
+
+    container(btn)
+        .style(move |_theme: &Theme| container::Style {
             background: Some(surface_alt.into()),
             border: iced::border::Border {
                 color: border_color,
                 width: BORDER_WIDTH,
                 radius: CORNER_RADIUS.into(),
             },
-            ..button::Style::default()
-        });
-
-    // Fixed outer size — hover grows inward via negative padding
-    let btn_size = card_size + BORDER_WIDTH * 2.0;
-    let inset = grow;
-
-    container(container(btn).width(btn_size).height(btn_size))
-        .width(FULL_CARD_SIZE)
-        .height(FULL_CARD_SIZE)
-        .padding(Padding {
-            top: -inset,
-            bottom: -inset,
-            left: -inset,
-            right: -inset,
+            ..container::Style::default()
         })
-        .center_x(FULL_CARD_SIZE)
-        .center_y(FULL_CARD_SIZE)
         .into()
 }
 
