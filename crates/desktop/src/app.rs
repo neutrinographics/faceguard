@@ -360,14 +360,11 @@ impl App {
             Tab::About => tabs::about_tab::view(fs, &current_theme),
         };
 
-        let tab_content = container(
-            scrollable(content)
-                .id(iced::widget::Id::new(SCROLL_ID))
-                .spacing(4)
-                .height(Length::Fill),
-        )
-        .padding(24)
-        .height(Length::Fill);
+        let padded_content = container(content).padding(iced::Padding { top: 24.0, right: 24.0, bottom: 24.0, left: 24.0 });
+
+        let tab_content = scrollable(padded_content)
+            .id(iced::widget::Id::new(SCROLL_ID))
+            .height(Length::Fill);
 
         column![tab_bar, tab_content]
             .spacing(0)
