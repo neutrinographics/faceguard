@@ -8,16 +8,18 @@ use iced_anim::AnimationBuilder;
 
 use crate::app::{scaled, Message};
 
-const CARD_SIZE: f32 = 104.0;
 const CORNER_RADIUS: f32 = 12.0;
 const BORDER_WIDTH: f32 = 2.5;
 const BADGE_RADIUS: f32 = 10.0;
 const CHECK_SIZE: f32 = 20.0;
-const SCALE_GROW: f32 = 3.0;
-const ANIMATION_DURATION: Duration = Duration::from_millis(350);
+const SCALE_GROW: f32 = 2.0;
+const ANIMATION_DURATION: Duration = Duration::from_millis(200);
 
 /// The outer size each card occupies in the grid (fixed, never changes with hover).
-pub const FULL_CARD_SIZE: f32 = CARD_SIZE + BORDER_WIDTH * 2.0;
+pub const FULL_CARD_SIZE: f32 = 109.0;
+
+/// Image size at rest. Leaves room for border + padding on each side.
+const IMG_SIZE: f32 = FULL_CARD_SIZE - BORDER_WIDTH * 4.0;
 
 pub fn face_card<'a>(
     path: &Path,
@@ -78,7 +80,7 @@ fn build_card<'a>(
     fs: f32,
 ) -> Element<'a, Message> {
     let grow = SCALE_GROW * hover_amount;
-    let card_size = CARD_SIZE + grow * 2.0;
+    let card_size = IMG_SIZE + grow * 2.0;
 
     let inner_radius = (CORNER_RADIUS - BORDER_WIDTH).max(0.0);
     let img = image(image::Handle::from_path(path))
@@ -169,6 +171,7 @@ fn build_card<'a>(
         });
 
     container(btn)
+        .padding(iced::Padding::from(BORDER_WIDTH))
         .style(move |_theme: &Theme| container::Style {
             background: Some(surface_alt.into()),
             border: iced::border::Border {
@@ -185,7 +188,11 @@ fn surface_alt_color(theme: &Theme) -> Color {
     let p = theme.palette();
     let luma = p.background.r * 0.299 + p.background.g * 0.587 + p.background.b * 0.114;
     if luma > 0.5 {
-        Color::from_rgb(0xF0 as f32 / 255.0, 0xED as f32 / 255.0, 0xE8 as f32 / 255.0)
+        Color::from_rgb(
+            0xF0 as f32 / 255.0,
+            0xED as f32 / 255.0,
+            0xE8 as f32 / 255.0,
+        )
     } else {
         Color {
             r: (p.background.r + 0.12).min(1.0),
