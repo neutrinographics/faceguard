@@ -9,7 +9,7 @@ pub fn resolve_theme(appearance: Appearance, high_contrast: bool) -> Theme {
     let is_dark = match appearance {
         Appearance::Dark => true,
         Appearance::Light => false,
-        Appearance::System => detect_system_dark_mode(),
+        Appearance::System => crate::platform::is_dark_mode(),
     };
 
     let palette = match (is_dark, high_contrast) {
@@ -97,24 +97,5 @@ fn high_contrast_light_palette() -> Palette {
         success: color!(0x15, 0x80, 0x3d),
         warning: color!(0xa1, 0x64, 0x07),
         danger: color!(0xb9, 0x1c, 0x1c),
-    }
-}
-
-fn detect_system_dark_mode() -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("defaults")
-            .args(["read", "-g", "AppleInterfaceStyle"])
-            .output()
-            .map(|o| {
-                String::from_utf8_lossy(&o.stdout)
-                    .trim()
-                    .eq_ignore_ascii_case("dark")
-            })
-            .unwrap_or(true)
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        true
     }
 }

@@ -1,4 +1,5 @@
 mod app;
+mod platform;
 mod settings;
 mod tabs;
 mod theme;
