@@ -142,7 +142,8 @@ jobs:
 
       - name: Build MSI installer (Windows)
         if: runner.os == 'Windows'
-        run: cargo wix -p faceguard-desktop --nocapture
+        working-directory: crates/desktop
+        run: cargo wix --nocapture
 
       - name: Upload MSI installer
         if: runner.os == 'Windows'
