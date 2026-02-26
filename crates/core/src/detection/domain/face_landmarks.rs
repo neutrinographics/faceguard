@@ -88,6 +88,44 @@ impl FaceLandmarks {
         }
     }
 
+    /// Normalized 2D vector from nose toward eye midpoint (back-of-head direction).
+    ///
+    /// Returns a unit vector `(dx, dy)` pointing from the nose toward the eye
+    /// midpoint. For frontal faces (within 15% eye-span threshold) or when
+    /// landmarks are not visible, returns `(0.0, 0.0)`.
+    pub fn back_of_head_vector(&self) -> (f64, f64) {
+        let nose = self.points[NOSE];
+        let left_eye = self.points[LEFT_EYE];
+        let right_eye = self.points[RIGHT_EYE];
+
+        if nose.0 <= 0.0 || left_eye.0 <= 0.0 || right_eye.0 <= 0.0 {
+            return (0.0, 0.0);
+        }
+
+        let eye_mid_x = (left_eye.0 + right_eye.0) / 2.0;
+        let eye_mid_y = (left_eye.1 + right_eye.1) / 2.0;
+        let eye_span = (right_eye.0 - left_eye.0).abs();
+
+        if eye_span <= 0.0 {
+            return (0.0, 0.0);
+        }
+
+        let dx = eye_mid_x - nose.0;
+        let dy = eye_mid_y - nose.1;
+
+        // Frontal threshold: horizontal offset within 15% of eye span
+        if dx.abs() < eye_span * 0.15 {
+            return (0.0, 0.0);
+        }
+
+        let len = (dx * dx + dy * dy).sqrt();
+        if len <= 0.0 {
+            return (0.0, 0.0);
+        }
+
+        (dx / len, dy / len)
+    }
+
     /// How much the face is turned: 0.0 = frontal, 1.0 = full profile.
     ///
     /// Measures nose offset from eye midpoint relative to eye span.
@@ -335,5 +373,54 @@ mod tests {
             (100.0, 100.0),
         ]);
         assert_relative_eq!(lm.profile_ratio(), 0.0);
+    }
+
+    // ── back_of_head_vector ──────────────────────────────────────
+
+    #[test]
+    fn test_back_of_head_vector_frontal_returns_zero() {
+        let lm = frontal_landmarks();
+        let (dx, dy) = lm.back_of_head_vector();
+        assert_relative_eq!(dx, 0.0);
+        assert_relative_eq!(dy, 0.0);
+    }
+
+    #[test]
+    fn test_back_of_head_vector_left_profile_points_right() {
+        let lm = left_profile_landmarks();
+        // Nose at (100, 420), eye midpoint at (150, 350)
+        // Vector from nose to eye midpoint: (50, -70), normalized
+        let (dx, dy) = lm.back_of_head_vector();
+        assert!(dx > 0.0, "dx should be positive (pointing right)");
+        assert!(dy < 0.0, "dy should be negative (pointing up toward eyes)");
+        // Should be normalized
+        let len = (dx * dx + dy * dy).sqrt();
+        assert_relative_eq!(len, 1.0, epsilon = 0.01);
+    }
+
+    #[test]
+    fn test_back_of_head_vector_right_profile_points_left() {
+        let lm = right_profile_landmarks();
+        // Nose at (610, 420), eye midpoint at (560, 350)
+        // Vector from nose to eye midpoint: (-50, -70), normalized
+        let (dx, dy) = lm.back_of_head_vector();
+        assert!(dx < 0.0, "dx should be negative (pointing left)");
+        assert!(dy < 0.0, "dy should be negative (pointing up toward eyes)");
+        let len = (dx * dx + dy * dy).sqrt();
+        assert_relative_eq!(len, 1.0, epsilon = 0.01);
+    }
+
+    #[test]
+    fn test_back_of_head_vector_missing_landmarks_returns_zero() {
+        let lm = FaceLandmarks::new([
+            (100.0, 100.0),
+            (200.0, 100.0),
+            (0.0, 0.0), // nose invisible
+            (100.0, 100.0),
+            (100.0, 100.0),
+        ]);
+        let (dx, dy) = lm.back_of_head_vector();
+        assert_relative_eq!(dx, 0.0);
+        assert_relative_eq!(dy, 0.0);
     }
 }

@@ -76,11 +76,12 @@ impl FaceRegionBuilder {
             Some(lm) if lm.has_visible() => {
                 let (face_cx, face_cy) = lm.center().unwrap_or((box_cx, box_cy));
                 let mut cx = face_cx + (box_cx - face_cx) * profile_ratio;
-                let cy = face_cy + (box_cy - face_cy) * profile_ratio;
+                let mut cy = face_cy + (box_cy - face_cy) * profile_ratio;
 
                 if self.center_offset != 0.0 {
-                    let direction = lm.back_of_head_direction();
-                    cx += self.center_offset * half_w * direction;
+                    let (vx, vy) = lm.back_of_head_vector();
+                    cx += self.center_offset * half_w * vx;
+                    cy += self.center_offset * half_w * vy;
                 }
 
                 (cx, cy)
@@ -471,6 +472,34 @@ mod tests {
         assert!(
             r_large.full_height.unwrap() > r_small.full_height.unwrap(),
             "Larger padding should produce larger height"
+        );
+    }
+
+    #[test]
+    fn test_center_offset_shifts_both_axes_for_profile() {
+        // Left profile: nose at (80, 420), eyes at (120,350)/(180,350)
+        // Vector from nose to eye midpoint has both x and y components
+        let lm = FaceLandmarks::new([
+            (120.0, 350.0),
+            (180.0, 350.0),
+            (80.0, 420.0),
+            (100.0, 470.0),
+            (160.0, 470.0),
+        ]);
+        let bbox: BBox = (50.0, 300.0, 250.0, 500.0);
+
+        let mut b_no = FaceRegionBuilder::new(PADDING, 0.0, None);
+        let r_no = b_no.build(bbox, FRAME_W, FRAME_H, Some(&lm), None);
+        let cy_no = r_no.unclamped_y.unwrap() as f64 + r_no.full_height.unwrap() as f64 / 2.0;
+
+        let mut b_off = FaceRegionBuilder::new(PADDING, 0.3, None);
+        let r_off = b_off.build(bbox, FRAME_W, FRAME_H, Some(&lm), None);
+        let cy_off = r_off.unclamped_y.unwrap() as f64 + r_off.full_height.unwrap() as f64 / 2.0;
+
+        // Vector points from nose upward toward eyes, so cy should shift upward (smaller)
+        assert!(
+            cy_off < cy_no,
+            "Expected offset cy {cy_off} < no-offset cy {cy_no} (shift toward eyes)"
         );
     }
 
