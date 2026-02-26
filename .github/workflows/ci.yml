@@ -34,6 +34,10 @@ jobs:
           FFMPEG_PREFIX=$(brew --prefix ffmpeg@7)
           echo "PKG_CONFIG_PATH=${FFMPEG_PREFIX}/lib/pkgconfig" >> $GITHUB_ENV
 
+      - name: Setup MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Install FFmpeg (Windows)
         if: runner.os == 'Windows'
         run: |
@@ -42,7 +46,7 @@ jobs:
           Expand-Archive ffmpeg.zip -DestinationPath C:\ffmpeg-dev
           $ffmpegDir = (Get-ChildItem C:\ffmpeg-dev -Directory | Select-Object -First 1).FullName
           echo "FFMPEG_DIR=$ffmpegDir" >> $env:GITHUB_ENV
-          echo "INCLUDE=$ffmpegDir\include" >> $env:GITHUB_ENV
+          echo "INCLUDE=$ffmpegDir\include;$env:INCLUDE" >> $env:GITHUB_ENV
           echo "$ffmpegDir\bin" | Out-File -Append $env:GITHUB_PATH
 
       - name: Run tests
