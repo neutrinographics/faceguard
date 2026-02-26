@@ -23,7 +23,10 @@
       "Bash(/Users/joel/.cargo/bin/cargo clippy:*)",
       "Bash(cargo build:*)",
       "WebFetch(domain:docs.rs)",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:claude.ai)",
+      "WebFetch(domain:)",
+      "Bash(git stash:*)"
     ]
   }
 }

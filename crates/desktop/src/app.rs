@@ -1,12 +1,14 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use crossbeam_channel::Receiver;
-use iced::widget::{button, column, container, operation, row, scrollable, text, Space};
-use iced::{Element, Length, Subscription, Task, Theme};
+use iced::widget::{button, column, container, mouse_area, operation, row, scrollable, text, Space};
+use iced::{Color, Element, Length, Subscription, Task, Theme};
+use iced_anim::AnimationBuilder;
+use iced_anim::transition::Easing;
 
 use crate::settings::{Appearance, BlurShape, Settings};
 use crate::tabs;
@@ -85,6 +87,20 @@ pub enum Message {
     FontScaleChanged(f32),
     PollSystemTheme,
     FileDropped(PathBuf),
+    TabHover(usize, bool),
+    BrowseHover(bool),
+    DropZoneHover(bool),
+    BlurButtonHover(bool),
+    ChangeInputHover(bool),
+    ChangeOutputHover(bool),
+    ChooseFacesHover(bool),
+    CancelHover(bool),
+    RescanHover(bool),
+    FaceCardHover(u32, bool),
+    ShowFolderHover(bool),
+    BlurAnotherHover(bool),
+    RestoreDefaultsHover(bool),
+    WebsiteHover(bool),
 }
 
 pub struct App {
@@ -100,6 +116,20 @@ pub struct App {
     preview_rx: Option<Receiver<PreviewMessage>>,
     worker_rx: Option<Receiver<WorkerMessage>>,
     worker_cancel: Option<Arc<AtomicBool>>,
+    tab_hovered: [bool; 3],
+    pub browse_hovered: bool,
+    pub drop_zone_hovered: bool,
+    pub blur_button_hovered: bool,
+    pub change_input_hovered: bool,
+    pub change_output_hovered: bool,
+    pub choose_faces_hovered: bool,
+    pub cancel_hovered: bool,
+    pub rescan_hovered: bool,
+    pub face_card_hovered: HashSet<u32>,
+    pub show_folder_hovered: bool,
+    pub blur_another_hovered: bool,
+    pub restore_defaults_hovered: bool,
+    pub website_hovered: bool,
 }
 
 impl App {
@@ -118,6 +148,20 @@ impl App {
                 preview_rx: None,
                 worker_rx: None,
                 worker_cancel: None,
+                tab_hovered: [false; 3],
+                browse_hovered: false,
+                drop_zone_hovered: false,
+                blur_button_hovered: false,
+                change_input_hovered: false,
+                change_output_hovered: false,
+                choose_faces_hovered: false,
+                cancel_hovered: false,
+                rescan_hovered: false,
+                face_card_hovered: HashSet::new(),
+                show_folder_hovered: false,
+                blur_another_hovered: false,
+                restore_defaults_hovered: false,
+                website_hovered: false,
             },
             Task::none(),
         )
@@ -208,6 +252,54 @@ impl App {
                     return self.update(Message::InputSelected(Some(path)));
                 }
             }
+            Message::TabHover(idx, hovered) => {
+                if idx < self.tab_hovered.len() {
+                    self.tab_hovered[idx] = hovered;
+                }
+            }
+            Message::BrowseHover(hovered) => {
+                self.browse_hovered = hovered;
+            }
+            Message::DropZoneHover(hovered) => {
+                self.drop_zone_hovered = hovered;
+            }
+            Message::BlurButtonHover(hovered) => {
+                self.blur_button_hovered = hovered;
+            }
+            Message::ChangeInputHover(hovered) => {
+                self.change_input_hovered = hovered;
+            }
+            Message::ChangeOutputHover(hovered) => {
+                self.change_output_hovered = hovered;
+            }
+            Message::ChooseFacesHover(hovered) => {
+                self.choose_faces_hovered = hovered;
+            }
+            Message::CancelHover(hovered) => {
+                self.cancel_hovered = hovered;
+            }
+            Message::RescanHover(hovered) => {
+                self.rescan_hovered = hovered;
+            }
+            Message::ShowFolderHover(hovered) => {
+                self.show_folder_hovered = hovered;
+            }
+            Message::BlurAnotherHover(hovered) => {
+                self.blur_another_hovered = hovered;
+            }
+            Message::RestoreDefaultsHover(hovered) => {
+                self.restore_defaults_hovered = hovered;
+            }
+            Message::WebsiteHover(hovered) => {
+                self.website_hovered = hovered;
+            }
+            Message::FaceCardHover(id, hovered) => {
+                if hovered {
+                    self.face_card_hovered.insert(id);
+                } else {
+                    self.face_card_hovered.remove(&id);
+                }
+            }
         }
         Task::none()
     }
@@ -216,16 +308,39 @@ impl App {
         let fs = self.settings.font_scale;
         let current_theme = self.theme();
         let palette = current_theme.palette();
-        let muted = theme::muted_color(&current_theme);
 
-        let tab_bar = container(
+        let surface = theme::surface_color(&current_theme);
+        let border_light = iced::Color {
+            a: 0.12,
+            ..palette.text
+        };
+
+        let tab_row = container(
             row(Tab::ALL
                 .iter()
-                .map(|&tab| tab_button(tab, tab == self.active_tab, palette, muted, fs))
+                .enumerate()
+                .map(|(idx, &tab)| {
+                    tab_button(tab, tab == self.active_tab, self.tab_hovered[idx], idx, palette, fs)
+                })
                 .collect::<Vec<_>>())
-            .spacing(0),
+            .spacing(4),
         )
-        .padding([0, 8]);
+        .width(Length::Fill)
+        .padding([0, 20])
+        .style(move |_theme: &Theme| container::Style {
+            background: Some(surface.into()),
+            ..container::Style::default()
+        });
+
+        let tab_divider = container(Space::new().height(0))
+            .width(Length::Fill)
+            .height(1)
+            .style(move |_theme: &Theme| container::Style {
+                background: Some(border_light.into()),
+                ..container::Style::default()
+            });
+
+        let tab_bar = column![tab_row, tab_divider].spacing(0);
 
         let content: Element<'_, Message> = match self.active_tab {
             Tab::Blur => tabs::main_tab::view(
@@ -235,19 +350,27 @@ impl App {
                 &self.processing,
                 &self.faces_well,
                 &current_theme,
+                self.browse_hovered,
+                self.drop_zone_hovered,
+                self.blur_button_hovered,
+                self.change_input_hovered,
+                self.change_output_hovered,
+                self.choose_faces_hovered,
+                self.cancel_hovered,
+                self.rescan_hovered,
+                &self.face_card_hovered,
+                self.show_folder_hovered,
+                self.blur_another_hovered,
             ),
-            Tab::Settings => tabs::settings_tab::view(&self.settings, self.gpu_context.is_some()),
-            Tab::About => tabs::about_tab::view(fs, &current_theme),
+            Tab::Settings => tabs::settings_tab::view(&self.settings, self.gpu_context.is_some(), self.restore_defaults_hovered),
+            Tab::About => tabs::about_tab::view(fs, &current_theme, self.website_hovered),
         };
 
-        let tab_content = container(
-            scrollable(content)
-                .id(iced::widget::Id::new(SCROLL_ID))
-                .spacing(4)
-                .height(Length::Fill),
-        )
-        .padding(24)
-        .height(Length::Fill);
+        let padded_content = container(content).padding(iced::Padding { top: 24.0, right: 24.0, bottom: 24.0, left: 24.0 });
+
+        let tab_content = scrollable(padded_content)
+            .id(iced::widget::Id::new(SCROLL_ID))
+            .height(Length::Fill);
 
         column![tab_bar, tab_content]
             .spacing(0)
@@ -488,31 +611,85 @@ impl App {
 fn tab_button<'a>(
     tab: Tab,
     is_active: bool,
+    is_hovered: bool,
+    idx: usize,
     palette: iced::theme::Palette,
-    muted: iced::Color,
     fs: f32,
 ) -> Element<'a, Message> {
-    let label_color = if is_active { palette.primary } else { muted };
-    let label = text(tab.label()).size(scaled(13.0, fs)).color(label_color);
-    let btn = button(label)
-        .on_press(Message::TabSelected(tab))
-        .padding([12, 20])
-        .style(button::text);
+    let inactive_color = Color {
+        a: 0.45,
+        ..palette.text
+    };
+    let hover_color = Color {
+        a: 0.65,
+        ..palette.text
+    };
+    let active_color = palette.primary;
 
-    let bar: Element<'_, Message> = if is_active {
-        container(Space::new().height(0))
-            .width(Length::Fill)
-            .height(2)
-            .style(move |_theme: &Theme| container::Style {
-                background: Some(palette.primary.into()),
-                ..Default::default()
-            })
-            .into()
+    let target_color = if is_active {
+        active_color
+    } else if is_hovered {
+        hover_color
     } else {
-        Space::new().height(2).into()
+        inactive_color
     };
 
-    column![btn, bar].align_x(iced::Alignment::Center).into()
+    let primary = palette.primary;
+
+    let tab_content: Element<'_, Message> = AnimationBuilder::new(target_color, move |color| {
+        let label = text(tab.label())
+            .size(scaled(14.0, fs))
+            .color(color)
+            .font(iced::Font {
+                weight: iced::font::Weight::Semibold,
+                ..iced::Font::DEFAULT
+            });
+        let btn = button(label)
+            .on_press(Message::TabSelected(tab))
+            .padding([12, 20])
+            .width(Length::Shrink)
+            .style(move |_theme: &Theme, _status: button::Status| button::Style {
+                text_color: color,
+                ..button::Style::default()
+            });
+
+        let bar: Element<'_, Message> = if is_active {
+            container(
+                container(Space::new().height(0))
+                    .width(Length::Fill)
+                    .height(2.5)
+                    .style(move |_theme: &Theme| container::Style {
+                        background: Some(primary.into()),
+                        border: iced::border::Border {
+                            radius: iced::border::Radius {
+                                top_left: 2.0,
+                                top_right: 2.0,
+                                bottom_right: 0.0,
+                                bottom_left: 0.0,
+                            },
+                            ..iced::border::Border::default()
+                        },
+                        ..Default::default()
+                    }),
+            )
+            .padding([0, 12])
+            .into()
+        } else {
+            Space::new().height(2.5).into()
+        };
+
+        column![btn, bar]
+            .width(Length::Shrink)
+            .align_x(iced::Alignment::Center)
+            .into()
+    })
+    .animation(Easing::EASE_OUT.with_duration(Duration::from_millis(200)))
+    .into();
+
+    mouse_area(tab_content)
+        .on_enter(Message::TabHover(idx, true))
+        .on_exit(Message::TabHover(idx, false))
+        .into()
 }
 
 fn has_supported_extension(path: &std::path::Path) -> bool {
