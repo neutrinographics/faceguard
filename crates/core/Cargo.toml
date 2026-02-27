@@ -19,6 +19,7 @@ image = { workspace = true }
 ffmpeg-next = { workspace = true }
 crossbeam-channel = { workspace = true }
 rustfft = "6"
+whisper-rs = "0.15.1"
 
 [features]
 static-ffmpeg = ["ffmpeg-next/build", "ffmpeg-next/build-lib-x264", "ffmpeg-next/build-license-gpl"]
