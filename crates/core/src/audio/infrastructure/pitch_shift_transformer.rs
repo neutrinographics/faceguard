@@ -248,9 +248,8 @@ fn psola_synthesize(
     let mut synth_pos = 0.0f64;
 
     while synth_pos < n as f64 {
-        // Map synthesis position back to analysis time
-        let analysis_time = synth_pos * shift_ratio;
-        let nearest_idx = find_nearest_mark(analysis_marks, analysis_time);
+        // Use grain from the same time position (time-preserving pitch shift)
+        let nearest_idx = find_nearest_mark(analysis_marks, synth_pos);
         grain_sources.push((synth_pos, nearest_idx));
 
         // Advance by the local period at the desired output pitch

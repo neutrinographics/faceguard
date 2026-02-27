@@ -89,10 +89,9 @@ impl AudioTransformer for VoiceMorphTransformer {
             let local_semitones = self.base_semitones + warp_offset;
             let local_ratio = 2.0_f64.powf(local_semitones / 12.0);
 
-            // Map synthesis position back to analysis time
-            let analysis_time = synth_pos * local_ratio;
+            // Use grain from the same time position (time-preserving pitch shift)
             let nearest_idx =
-                find_nearest_mark(&analysis_marks, analysis_time);
+                find_nearest_mark(&analysis_marks, synth_pos);
             grain_sources.push((synth_pos, nearest_idx));
 
             // Advance by local period at output pitch
