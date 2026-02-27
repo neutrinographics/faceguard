@@ -47,14 +47,15 @@ impl FrameBlurrer for CpuRectangularBlurrer {
         regions: &[Region],
     ) -> Result<(), Box<dyn std::error::Error>> {
         let fw = frame.width() as usize;
+        let fh = frame.height() as usize;
         let channels = frame.channels() as usize;
         let data = frame.data_mut();
 
         for r in regions {
             let rx = r.x.max(0) as usize;
             let ry = r.y.max(0) as usize;
-            let rw = r.width.max(0) as usize;
-            let rh = r.height.max(0) as usize;
+            let rw = (r.width.max(0) as usize).min(fw.saturating_sub(rx));
+            let rh = (r.height.max(0) as usize).min(fh.saturating_sub(ry));
 
             if rw == 0 || rh == 0 {
                 continue;
@@ -220,5 +221,12 @@ mod tests {
         assert!(blurrer.scale > 1);
         assert!(blurrer.small_kernel.len() < blurrer.kernel.len());
         assert_eq!(blurrer.small_kernel.len() % 2, 1);
+    }
+
+    #[test]
+    fn test_region_extending_beyond_frame_does_not_panic() {
+        let mut frame = make_frame(50, 50, 128);
+        let blurrer = CpuRectangularBlurrer::new(5);
+        blurrer.blur(&mut frame, &[region(40, 40, 30, 30)]).unwrap();
     }
 }

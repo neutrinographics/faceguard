@@ -89,6 +89,10 @@ pub enum Message {
     HighContrastChanged(bool),
     QualityChanged(u32),
     FontScaleChanged(f32),
+    AudioProcessingChanged(bool),
+    BleepKeywordsChanged(String),
+    BleepSoundChanged(crate::settings::BleepSound),
+    VoiceDisguiseChanged(crate::settings::VoiceDisguise),
     PollSystemTheme,
     FileDropped(PathBuf),
     TabHover(usize, bool),
@@ -258,6 +262,22 @@ impl App {
             }
             Message::FontScaleChanged(scale) => {
                 self.settings.font_scale = scale;
+                self.settings.save();
+            }
+            Message::AudioProcessingChanged(enabled) => {
+                self.settings.audio_processing = enabled;
+                self.settings.save();
+            }
+            Message::BleepKeywordsChanged(keywords) => {
+                self.settings.bleep_keywords = keywords;
+                self.settings.save();
+            }
+            Message::BleepSoundChanged(sound) => {
+                self.settings.bleep_sound = sound;
+                self.settings.save();
+            }
+            Message::VoiceDisguiseChanged(disguise) => {
+                self.settings.voice_disguise = disguise;
                 self.settings.save();
             }
             Message::PollSystemTheme => {}
@@ -536,6 +556,10 @@ impl App {
                 blur_ids: self.faces_well.get_selected_ids(),
                 model_cache: self.model_cache.clone(),
                 gpu_context: self.gpu_context.clone(),
+                audio_processing: self.settings.audio_processing,
+                bleep_keywords: self.settings.bleep_keywords.clone(),
+                bleep_sound: self.settings.bleep_sound,
+                voice_disguise: self.settings.voice_disguise,
             };
             let (rx, cancel) = blur_worker::spawn(params);
             self.worker_rx = Some(rx);

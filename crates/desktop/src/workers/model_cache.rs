@@ -7,7 +7,8 @@ use std::time::Duration;
 use faceguard_core::detection::infrastructure::model_resolver;
 use faceguard_core::detection::infrastructure::onnx_yolo_detector;
 use faceguard_core::shared::constants::{
-    EMBEDDING_MODEL_NAME, EMBEDDING_MODEL_URL, YOLO_MODEL_NAME, YOLO_MODEL_URL,
+    EMBEDDING_MODEL_NAME, EMBEDDING_MODEL_URL, WHISPER_MODEL_NAME, WHISPER_MODEL_URL,
+    YOLO_MODEL_NAME, YOLO_MODEL_URL,
 };
 
 /// Shared model cache that resolves models and pre-builds ONNX sessions
@@ -16,6 +17,7 @@ use faceguard_core::shared::constants::{
 pub struct ModelCache {
     yolo_path: Arc<ModelSlot>,
     embedding_path: Arc<ModelSlot>,
+    whisper_path: Arc<ModelSlot>,
     yolo_session: Arc<SessionSlot>,
 }
 
@@ -39,11 +41,13 @@ impl ModelCache {
         let cache = Arc::new(Self {
             yolo_path: Arc::new(ModelSlot::new()),
             embedding_path: Arc::new(ModelSlot::new()),
+            whisper_path: Arc::new(ModelSlot::new()),
             yolo_session: Arc::new(SessionSlot::new()),
         });
 
         let yolo_path_slot = cache.yolo_path.clone();
         let embedding_path_slot = cache.embedding_path.clone();
+        let whisper_path_slot = cache.whisper_path.clone();
         let session_slot = cache.yolo_session.clone();
         thread::spawn(move || {
             // Resolve YOLO model path (may download)
@@ -67,6 +71,9 @@ impl ModelCache {
 
             // Resolve embedding model path
             embedding_path_slot.resolve(EMBEDDING_MODEL_NAME, EMBEDDING_MODEL_URL);
+
+            // Resolve whisper model path
+            whisper_path_slot.resolve(WHISPER_MODEL_NAME, WHISPER_MODEL_URL);
         });
 
         cache
@@ -101,6 +108,15 @@ impl ModelCache {
         let session = self.yolo_session.session.lock().unwrap().clone();
         let input_size = *self.yolo_session.input_size.lock().unwrap();
         session.map(|s| (s, input_size))
+    }
+
+    /// Wait for the Whisper model path.
+    pub fn wait_for_whisper(
+        &self,
+        on_progress: &dyn Fn(u64, u64),
+        cancelled: &AtomicBool,
+    ) -> Result<PathBuf, String> {
+        self.whisper_path.wait(on_progress, cancelled)
     }
 
     /// Wait for the embedding model path.

@@ -1,0 +1,4 @@
+[env]
+# Workaround: Apple Clang 17+ does not support -mcpu=native.
+# This cmake toolchain file disables GGML_NATIVE in whisper-rs-sys builds.
+CMAKE_TOOLCHAIN_FILE = { value = "cmake/whisper-no-native.cmake", relative = true }

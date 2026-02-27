@@ -82,6 +82,18 @@ struct Cli {
     /// H.264 CRF quality (0=lossless, 51=worst, default 18).
     #[arg(long)]
     quality: Option<u32>,
+
+    /// Comma-separated keywords to bleep out (enables audio processing).
+    #[arg(long, value_delimiter = ',')]
+    audio_keywords: Option<Vec<String>>,
+
+    /// Voice disguise level: off, low, medium, high.
+    #[arg(long, default_value = "off")]
+    voice_disguise: String,
+
+    /// Bleep sound for censored words: tone or silence.
+    #[arg(long, default_value = "tone")]
+    bleep_sound: String,
 }
 
 fn main() {
@@ -105,6 +117,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let blur_ids = to_id_set(cli.blur_ids);
     let exclude_ids = to_id_set(cli.exclude_ids);
     let quality = cli.quality;
+    let audio_keywords = cli.audio_keywords;
+    let voice_disguise = cli.voice_disguise;
+    let bleep_sound = cli.bleep_sound;
 
     if let Some(preview_dir) = cli.preview {
         run_preview(&input, &preview_dir, detector)?;
@@ -127,6 +142,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             blur_ids,
             exclude_ids,
             quality,
+            &audio_keywords,
+            &voice_disguise,
+            &bleep_sound,
         )?;
     }
 
@@ -192,13 +210,20 @@ fn run_video_blur(
     blur_ids: Option<HashSet<u32>>,
     exclude_ids: Option<HashSet<u32>>,
     quality: Option<u32>,
+    audio_keywords: &Option<Vec<String>>,
+    voice_disguise: &str,
+    bleep_sound: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut reader: Box<dyn VideoReader> = Box::new(FfmpegReader::new());
     let metadata = reader.open(input)?;
-    let ffmpeg_writer = match quality {
+    let has_audio = audio_keywords.is_some() || voice_disguise != "off";
+    let mut ffmpeg_writer = match quality {
         Some(crf) => FfmpegWriter::new().with_crf(crf),
         None => FfmpegWriter::new(),
     };
+    if has_audio {
+        ffmpeg_writer.set_skip_audio_passthrough(true);
+    }
     let writer: Box<dyn VideoWriter> = Box::new(ffmpeg_writer);
 
     let total = metadata.total_frames;
@@ -223,6 +248,77 @@ fn run_video_blur(
     use_case.execute(&metadata, output)?;
     eprintln!();
     log::info!("Output written to {}", output.display());
+
+    // Audio processing (if keywords or voice disguise enabled)
+    if has_audio {
+        let transformer: Option<
+            Box<dyn faceguard_core::audio::domain::audio_transformer::AudioTransformer>,
+        > = match voice_disguise {
+            "low" => {
+                use faceguard_core::audio::infrastructure::pitch_shift_transformer::*;
+                Some(Box::new(PitchShiftTransformer::new(DEFAULT_SEMITONES)))
+            }
+            "medium" => {
+                use faceguard_core::audio::infrastructure::formant_shift_transformer::*;
+                Some(Box::new(FormantShiftTransformer::new(
+                    DEFAULT_FORMANT_SEMITONES,
+                    DEFAULT_FORMANT_SHIFT_RATIO,
+                )))
+            }
+            "high" => {
+                use faceguard_core::audio::infrastructure::voice_morph_transformer::*;
+                Some(Box::new(VoiceMorphTransformer::new(
+                    DEFAULT_MORPH_SEMITONES,
+                    DEFAULT_MORPH_FORMANT_RATIO,
+                    DEFAULT_JITTER_AMOUNT,
+                )))
+            }
+            _ => None,
+        };
+
+        let keywords = audio_keywords.clone().unwrap_or_default();
+
+        let bleep_mode = if bleep_sound == "silence" {
+            faceguard_core::audio::domain::word_censor::BleepMode::Silence
+        } else {
+            faceguard_core::audio::domain::word_censor::BleepMode::Tone
+        };
+
+        let recognizer: Option<
+            Box<dyn faceguard_core::audio::domain::speech_recognizer::SpeechRecognizer>,
+        > = if !keywords.is_empty() {
+            use faceguard_core::audio::infrastructure::whisper_recognizer::WhisperRecognizer;
+            use faceguard_core::shared::constants::{WHISPER_MODEL_NAME, WHISPER_MODEL_URL};
+
+            log::info!("Resolving Whisper model: {WHISPER_MODEL_NAME}");
+            let whisper_path = model_resolver::resolve(
+                WHISPER_MODEL_NAME,
+                WHISPER_MODEL_URL,
+                None,
+                Some(Box::new(|downloaded, total| {
+                    if total > 0 {
+                        let pct = (downloaded as f64 / total as f64 * 100.0) as u32;
+                        eprint!("\rDownloading speech recognition model... {pct}%");
+                    }
+                })),
+            )?;
+            eprintln!();
+            Some(Box::new(WhisperRecognizer::new(&whisper_path)?))
+        } else {
+            None
+        };
+
+        let use_case = faceguard_core::pipeline::process_audio_use_case::ProcessAudioUseCase::new(
+            Box::new(faceguard_core::video::infrastructure::ffmpeg_audio_reader::FfmpegAudioReader),
+            Box::new(faceguard_core::video::infrastructure::ffmpeg_audio_writer::FfmpegAudioWriter),
+            recognizer,
+            transformer,
+            keywords,
+            bleep_mode,
+        );
+        use_case.run(input, output)?;
+    }
+
     Ok(())
 }
 
@@ -297,6 +393,22 @@ fn validate(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!(
             "Blur shape must be 'ellipse' or 'rect', got '{}'",
             cli.blur_shape
+        )
+        .into());
+    }
+    let valid_disguises = ["off", "low", "medium", "high"];
+    if !valid_disguises.contains(&cli.voice_disguise.as_str()) {
+        return Err(format!(
+            "Voice disguise must be one of: off, low, medium, high, got '{}'",
+            cli.voice_disguise
+        )
+        .into());
+    }
+    let valid_bleep_sounds = ["tone", "silence"];
+    if !valid_bleep_sounds.contains(&cli.bleep_sound.as_str()) {
+        return Err(format!(
+            "Bleep sound must be 'tone' or 'silence', got '{}'",
+            cli.bleep_sound
         )
         .into());
     }
