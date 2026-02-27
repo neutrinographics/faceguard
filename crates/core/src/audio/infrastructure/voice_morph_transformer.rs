@@ -1,7 +1,6 @@
 use crate::audio::domain::audio_segment::AudioSegment;
 use crate::audio::domain::audio_transformer::AudioTransformer;
 use crate::audio::infrastructure::formant_shift_transformer::FormantShiftTransformer;
-use std::f64::consts::PI;
 
 /// Default pitch contour warp range in semitones.
 /// The shift varies by +/- this amount around the base shift via random walk.
@@ -55,8 +54,8 @@ impl Lcg {
 impl AudioTransformer for VoiceMorphTransformer {
     fn transform(&self, audio: &mut AudioSegment) -> Result<(), Box<dyn std::error::Error>> {
         use crate::audio::infrastructure::pitch_shift_transformer::{
-            analyze_pitch, place_pitch_marks, ANALYSIS_FRAME_SIZE, ANALYSIS_HOP,
-            UNVOICED_MARK_SPACING,
+            analyze_pitch, find_nearest_mark, local_period_at, place_pitch_marks,
+            psola_overlap_add, ANALYSIS_FRAME_SIZE,
         };
 
         let samples: Vec<f64> = audio.samples().iter().map(|&s| s as f64).collect();
@@ -75,85 +74,36 @@ impl AudioTransformer for VoiceMorphTransformer {
             return Ok(());
         }
 
-        // Step 2: Generate per-mark shift ratios via random walk
+        // Step 2: Generate synthesis marks covering the full output duration
+        // with per-mark varying shift via random walk
         let mut rng = Lcg::new(42);
         let mut warp_offset = 0.0f64;
+        let mut grain_sources: Vec<(f64, usize)> = Vec::new();
+        let mut synth_pos = 0.0f64;
 
-        let mut output = vec![0.0f64; n];
-        let mut window_sum = vec![0.0f64; n];
-
-        // Build synthesis marks with per-mark varying shift
-        let mut synthesis_marks = Vec::with_capacity(analysis_marks.len());
-        synthesis_marks.push(0.0f64);
-
-        for i in 1..analysis_marks.len() {
+        while synth_pos < n as f64 {
+            // Random walk step for pitch contour warping
             warp_offset += rng.next_f64() * CONTOUR_STEP_SIZE * self.contour_warp_range;
             warp_offset = warp_offset.clamp(-self.contour_warp_range, self.contour_warp_range);
 
             let local_semitones = self.base_semitones + warp_offset;
             let local_ratio = 2.0_f64.powf(local_semitones / 12.0);
 
-            let analysis_spacing =
-                analysis_marks[i] as f64 - analysis_marks[i - 1] as f64;
-            let synthesis_spacing = analysis_spacing / local_ratio;
-            synthesis_marks.push(synthesis_marks[i - 1] + synthesis_spacing);
+            // Map synthesis position back to analysis time
+            let analysis_time = synth_pos * local_ratio;
+            let nearest_idx =
+                find_nearest_mark(&analysis_marks, analysis_time);
+            grain_sources.push((synth_pos, nearest_idx));
+
+            // Advance by local period at output pitch
+            let analysis_pos = analysis_marks[nearest_idx];
+            let period = local_period_at(analysis_pos, &pitch_frames);
+            synth_pos += (period as f64 / local_ratio).max(1.0);
         }
 
-        // Step 3: PSOLA overlap-add with the warped synthesis marks
-        for (i, &analysis_pos) in analysis_marks.iter().enumerate() {
-            let frame_idx = (analysis_pos / ANALYSIS_HOP)
-                .min(pitch_frames.len().saturating_sub(1));
-            let local_period = if frame_idx < pitch_frames.len()
-                && pitch_frames[frame_idx].voiced
-            {
-                pitch_frames[frame_idx].period_samples
-            } else {
-                UNVOICED_MARK_SPACING
-            };
-
-            let half_win = local_period;
-            let win_size = 2 * half_win;
-            if win_size == 0 {
-                continue;
-            }
-
-            let hann: Vec<f64> = (0..win_size)
-                .map(|j| {
-                    0.5 * (1.0 - (2.0 * PI * j as f64 / win_size as f64).cos())
-                })
-                .collect();
-
-            let grain_start = analysis_pos.saturating_sub(half_win);
-            let grain_end = (analysis_pos + half_win).min(n);
-
-            let synth_center = synthesis_marks[i];
-            let synth_start = synth_center - half_win as f64;
-
-            for j in 0..(grain_end - grain_start) {
-                let src_idx = grain_start + j;
-                let dst_f = synth_start + j as f64;
-                let dst_idx = dst_f.round() as i64;
-                if dst_idx >= 0 && (dst_idx as usize) < n {
-                    let d = dst_idx as usize;
-                    let win_idx = if analysis_pos >= half_win {
-                        j
-                    } else {
-                        j + (half_win - analysis_pos)
-                    };
-                    if win_idx < win_size {
-                        output[d] += samples[src_idx] * hann[win_idx];
-                        window_sum[d] += hann[win_idx];
-                    }
-                }
-            }
-        }
-
-        // Normalize
-        for i in 0..n {
-            if window_sum[i] > 1e-10 {
-                output[i] /= window_sum[i];
-            }
-        }
+        // Step 3: PSOLA overlap-add using shared core
+        let output =
+            psola_overlap_add(&samples, &analysis_marks, &pitch_frames, &grain_sources);
 
         // Peak-normalize
         let input_peak = samples.iter().map(|s| s.abs()).fold(0.0f64, f64::max);
@@ -182,6 +132,7 @@ mod tests {
     use super::*;
     use crate::audio::infrastructure::formant_shift_transformer::DEFAULT_FORMANT_SHIFT_RATIO;
     use crate::audio::infrastructure::pitch_shift_transformer::DEFAULT_SEMITONES;
+    use std::f64::consts::PI;
 
     fn speech_like_segment(sample_rate: u32) -> AudioSegment {
         let duration = 1.0;

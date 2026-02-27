@@ -134,42 +134,50 @@ pub(crate) fn place_pitch_marks(samples: &[f64], pitch_frames: &[PitchFrame]) ->
     marks
 }
 
-/// PSOLA synthesis: given analysis marks and a shift ratio, produce output.
-/// shift_ratio > 1 means higher pitch (shorter periods).
-fn psola_synthesize(
+/// Find the index of the analysis mark nearest to `target_pos`.
+pub(crate) fn find_nearest_mark(analysis_marks: &[usize], target_pos: f64) -> usize {
+    let mut best_idx = 0;
+    let mut best_dist = f64::INFINITY;
+    for (i, &mark) in analysis_marks.iter().enumerate() {
+        let dist = (mark as f64 - target_pos).abs();
+        if dist < best_dist {
+            best_dist = dist;
+            best_idx = i;
+        } else {
+            // Marks are sorted, so once distance increases we can stop
+            break;
+        }
+    }
+    best_idx
+}
+
+/// Get the local pitch period at a given analysis mark position.
+pub(crate) fn local_period_at(analysis_pos: usize, pitch_frames: &[PitchFrame]) -> usize {
+    let frame_idx = (analysis_pos / ANALYSIS_HOP).min(pitch_frames.len().saturating_sub(1));
+    if frame_idx < pitch_frames.len() && pitch_frames[frame_idx].voiced {
+        pitch_frames[frame_idx].period_samples
+    } else {
+        UNVOICED_MARK_SPACING
+    }
+}
+
+/// Core PSOLA overlap-add: place grains from analysis positions at synthesis positions.
+///
+/// `grain_sources` is a list of (synthesis_center, analysis_mark_index) pairs.
+/// Each pair says "place the grain from analysis_marks[idx] at synthesis_center".
+pub(crate) fn psola_overlap_add(
     samples: &[f64],
     analysis_marks: &[usize],
     pitch_frames: &[PitchFrame],
-    shift_ratio: f64,
+    grain_sources: &[(f64, usize)],
 ) -> Vec<f64> {
     let n = samples.len();
     let mut output = vec![0.0f64; n];
     let mut window_sum = vec![0.0f64; n];
 
-    if analysis_marks.is_empty() {
-        return output;
-    }
-
-    // Compute synthesis marks by adjusting spacing
-    let mut synthesis_marks = Vec::with_capacity(analysis_marks.len());
-    synthesis_marks.push(0.0f64);
-
-    for i in 1..analysis_marks.len() {
-        let analysis_spacing = analysis_marks[i] as f64 - analysis_marks[i - 1] as f64;
-        let synthesis_spacing = analysis_spacing / shift_ratio;
-        let prev_synth = synthesis_marks[i - 1];
-        synthesis_marks.push(prev_synth + synthesis_spacing);
-    }
-
-    // For each analysis mark, extract a windowed grain and place it at the synthesis mark
-    for (i, &analysis_pos) in analysis_marks.iter().enumerate() {
-        let frame_idx =
-            (analysis_pos / ANALYSIS_HOP).min(pitch_frames.len().saturating_sub(1));
-        let local_period = if frame_idx < pitch_frames.len() && pitch_frames[frame_idx].voiced {
-            pitch_frames[frame_idx].period_samples
-        } else {
-            UNVOICED_MARK_SPACING
-        };
+    for &(synth_center, analysis_idx) in grain_sources {
+        let analysis_pos = analysis_marks[analysis_idx];
+        let local_period = local_period_at(analysis_pos, pitch_frames);
 
         let half_win = local_period;
         let win_size = 2 * half_win;
@@ -184,7 +192,6 @@ fn psola_synthesize(
         let grain_start = analysis_pos.saturating_sub(half_win);
         let grain_end = (analysis_pos + half_win).min(n);
 
-        let synth_center = synthesis_marks[i];
         let synth_start = synth_center - half_win as f64;
 
         for j in 0..(grain_end - grain_start) {
@@ -214,6 +221,45 @@ fn psola_synthesize(
     }
 
     output
+}
+
+/// PSOLA synthesis: given analysis marks and a shift ratio, produce output.
+/// shift_ratio > 1 means higher pitch (shorter periods).
+///
+/// Generates synthesis marks covering the full output duration. Each synthesis
+/// mark maps back to the nearest analysis grain via `synth_pos * shift_ratio`.
+fn psola_synthesize(
+    samples: &[f64],
+    analysis_marks: &[usize],
+    pitch_frames: &[PitchFrame],
+    shift_ratio: f64,
+) -> Vec<f64> {
+    let n = samples.len();
+
+    if analysis_marks.is_empty() {
+        return vec![0.0f64; n];
+    }
+
+    // Generate synthesis marks covering the full output duration.
+    // For each synthesis position, map back to analysis space to find the
+    // nearest grain to borrow. This ensures the output covers the entire
+    // signal without trailing silence.
+    let mut grain_sources: Vec<(f64, usize)> = Vec::new();
+    let mut synth_pos = 0.0f64;
+
+    while synth_pos < n as f64 {
+        // Map synthesis position back to analysis time
+        let analysis_time = synth_pos * shift_ratio;
+        let nearest_idx = find_nearest_mark(analysis_marks, analysis_time);
+        grain_sources.push((synth_pos, nearest_idx));
+
+        // Advance by the local period at the desired output pitch
+        let analysis_pos = analysis_marks[nearest_idx];
+        let period = local_period_at(analysis_pos, pitch_frames);
+        synth_pos += (period as f64 / shift_ratio).max(1.0);
+    }
+
+    psola_overlap_add(samples, analysis_marks, pitch_frames, &grain_sources)
 }
 
 impl AudioTransformer for PitchShiftTransformer {
