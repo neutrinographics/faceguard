@@ -62,24 +62,34 @@ fn detect_pitch(frame: &[f64], sample_rate: u32) -> PitchFrame {
         };
     }
 
-    let mut best_lag = min_lag;
-    let mut best_corr = f64::NEG_INFINITY;
-
+    // Compute normalized autocorrelation for all lags in range
+    let mut corr = vec![0.0f64; max_lag + 1];
     for lag in min_lag..=max_lag {
         let mut sum = 0.0;
         for i in 0..n - lag {
             sum += frame[i] * frame[i + lag];
         }
-        // Normalize by geometric mean of energies of the two segments
         let energy_a: f64 = frame[..n - lag].iter().map(|&s| s * s).sum();
         let energy_b: f64 = frame[lag..].iter().map(|&s| s * s).sum();
         let denom = (energy_a * energy_b).sqrt();
-        let normalized = if denom > 1e-10 { sum / denom } else { 0.0 };
+        corr[lag] = if denom > 1e-10 { sum / denom } else { 0.0 };
+    }
 
-        if normalized > best_corr {
-            best_corr = normalized;
+    let mut best_lag = min_lag;
+    let mut best_corr = f64::NEG_INFINITY;
+    for lag in min_lag..=max_lag {
+        if corr[lag] > best_corr {
+            best_corr = corr[lag];
             best_lag = lag;
         }
+    }
+
+    // Octave correction: if the correlation at half the best lag is nearly
+    // as strong, prefer the shorter period to avoid octave errors.
+    let half = best_lag / 2;
+    if half >= min_lag && corr[half] > best_corr * 0.85 {
+        best_lag = half;
+        best_corr = corr[half];
     }
 
     PitchFrame {
