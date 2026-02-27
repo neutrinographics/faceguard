@@ -26,7 +26,7 @@ Automatic face detection and blurring for videos and images. Detects faces using
     - macOS: `brew install x264`
     - Ubuntu/Debian: `apt install libx264-dev`
 
-ONNX models are downloaded automatically on first run to `~/.cache/FaceGuard/`.
+ONNX models are downloaded automatically from [neutrinographics/faceguard-ml-models](https://github.com/neutrinographics/faceguard-ml-models) on first run to `~/.cache/FaceGuard/`.
 
 ### Build
 

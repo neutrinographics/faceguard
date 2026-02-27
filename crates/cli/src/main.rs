@@ -87,7 +87,7 @@ struct Cli {
     #[arg(long, value_delimiter = ',')]
     audio_keywords: Option<Vec<String>>,
 
-    /// Voice disguise level: off, low, medium, high.
+    /// Voice disguise: off or on.
     #[arg(long, default_value = "off")]
     voice_disguise: String,
 
@@ -254,23 +254,14 @@ fn run_video_blur(
         let transformer: Option<
             Box<dyn faceguard_core::audio::domain::audio_transformer::AudioTransformer>,
         > = match voice_disguise {
-            "low" => {
-                use faceguard_core::audio::infrastructure::pitch_shift_transformer::*;
-                Some(Box::new(PitchShiftTransformer::new(DEFAULT_SEMITONES)))
-            }
-            "medium" => {
-                use faceguard_core::audio::infrastructure::formant_shift_transformer::*;
-                Some(Box::new(FormantShiftTransformer::new(
-                    DEFAULT_FORMANT_SEMITONES,
-                    DEFAULT_FORMANT_SHIFT_RATIO,
-                )))
-            }
-            "high" => {
+            "on" => {
+                use faceguard_core::audio::infrastructure::formant_shift_transformer::DEFAULT_FORMANT_SHIFT_RATIO;
+                use faceguard_core::audio::infrastructure::pitch_shift_transformer::DEFAULT_SEMITONES;
                 use faceguard_core::audio::infrastructure::voice_morph_transformer::*;
                 Some(Box::new(VoiceMorphTransformer::new(
-                    DEFAULT_MORPH_SEMITONES,
-                    DEFAULT_MORPH_FORMANT_RATIO,
-                    DEFAULT_JITTER_AMOUNT,
+                    DEFAULT_SEMITONES,
+                    DEFAULT_FORMANT_SHIFT_RATIO,
+                    DEFAULT_CONTOUR_WARP_RANGE,
                 )))
             }
             _ => None,
@@ -396,10 +387,10 @@ fn validate(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
         )
         .into());
     }
-    let valid_disguises = ["off", "low", "medium", "high"];
+    let valid_disguises = ["off", "on"];
     if !valid_disguises.contains(&cli.voice_disguise.as_str()) {
         return Err(format!(
-            "Voice disguise must be one of: off, low, medium, high, got '{}'",
+            "Voice disguise must be 'off' or 'on', got '{}'",
             cli.voice_disguise
         )
         .into());

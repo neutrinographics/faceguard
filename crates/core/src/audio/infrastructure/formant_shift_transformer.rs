@@ -1,15 +1,11 @@
 use crate::audio::domain::audio_segment::AudioSegment;
 use crate::audio::domain::audio_transformer::AudioTransformer;
-use crate::audio::infrastructure::pitch_shift_transformer::PitchShiftTransformer;
 use rustfft::num_complex::Complex;
 use rustfft::FftPlanner;
 use std::f64::consts::PI;
 
-/// Default pitch shift in semitones for the formant transformer.
-pub const DEFAULT_FORMANT_SEMITONES: f64 = 4.0;
-
 /// Default ratio by which formant frequencies are shifted.
-pub const DEFAULT_FORMANT_SHIFT_RATIO: f64 = 1.2;
+pub const DEFAULT_FORMANT_SHIFT_RATIO: f64 = 1.15;
 
 /// Order of the LPC (Linear Predictive Coding) analysis.
 const LPC_ORDER: usize = 16;
@@ -20,22 +16,18 @@ const WINDOW_SIZE: usize = 2048;
 /// Hop size between successive analysis frames.
 const HOP_SIZE: usize = 512;
 
-/// Voice transformer that applies pitch shifting AND formant envelope modification.
+/// Standalone spectral envelope modifier via LPC formant analysis.
 ///
-/// This is the "Medium" tier voice disguise. It first applies a phase-vocoder pitch
-/// shift (reusing `PitchShiftTransformer`), then modifies the spectral envelope via
-/// LPC-based formant analysis and frequency-domain envelope reshaping.
+/// Applies frequency-domain envelope reshaping without any pitch shifting.
+/// Used as the second stage in Medium/High tier voice disguise,
+/// after PSOLA pitch shifting has already been applied.
 pub struct FormantShiftTransformer {
-    pitch_shifter: PitchShiftTransformer,
     formant_ratio: f64,
 }
 
 impl FormantShiftTransformer {
-    pub fn new(semitones: f64, formant_ratio: f64) -> Self {
-        Self {
-            pitch_shifter: PitchShiftTransformer::new(semitones),
-            formant_ratio,
-        }
+    pub fn new(formant_ratio: f64) -> Self {
+        Self { formant_ratio }
     }
 }
 
@@ -138,10 +130,7 @@ fn shift_envelope(envelope: &[f64], ratio: f64) -> Vec<f64> {
 
 impl AudioTransformer for FormantShiftTransformer {
     fn transform(&self, audio: &mut AudioSegment) -> Result<(), Box<dyn std::error::Error>> {
-        // Step 1: Apply pitch shift
-        self.pitch_shifter.transform(audio)?;
-
-        // Step 2: Apply formant modification via spectral envelope reshaping
+        // Apply formant modification via spectral envelope reshaping
         if (self.formant_ratio - 1.0).abs() < 1e-10 {
             return Ok(());
         }
@@ -283,28 +272,45 @@ mod tests {
     }
 
     #[test]
-    fn test_formant_shift_changes_audio() {
+    fn test_formant_warp_changes_audio() {
         let original = speech_like_segment(16000);
-        let mut shifted = original.clone();
-        let transformer =
-            FormantShiftTransformer::new(DEFAULT_FORMANT_SEMITONES, DEFAULT_FORMANT_SHIFT_RATIO);
-        transformer.transform(&mut shifted).unwrap();
+        let mut warped = original.clone();
+        let transformer = FormantShiftTransformer::new(DEFAULT_FORMANT_SHIFT_RATIO);
+        transformer.transform(&mut warped).unwrap();
         let diff: f64 = original
             .samples()
             .iter()
-            .zip(shifted.samples().iter())
+            .zip(warped.samples().iter())
             .map(|(a, b)| ((*a - *b) as f64).powi(2))
             .sum();
         assert!(diff > 0.0);
     }
 
     #[test]
-    fn test_formant_shift_preserves_length() {
+    fn test_formant_warp_preserves_length() {
         let mut audio = speech_like_segment(16000);
         let original_len = audio.samples().len();
-        let transformer =
-            FormantShiftTransformer::new(DEFAULT_FORMANT_SEMITONES, DEFAULT_FORMANT_SHIFT_RATIO);
+        let transformer = FormantShiftTransformer::new(DEFAULT_FORMANT_SHIFT_RATIO);
         transformer.transform(&mut audio).unwrap();
         assert_eq!(audio.samples().len(), original_len);
+    }
+
+    #[test]
+    fn test_unity_ratio_near_identity() {
+        let original = speech_like_segment(16000);
+        let mut warped = original.clone();
+        let transformer = FormantShiftTransformer::new(1.0);
+        transformer.transform(&mut warped).unwrap();
+        let mse: f64 = original
+            .samples()
+            .iter()
+            .zip(warped.samples().iter())
+            .map(|(a, b)| ((*a - *b) as f64).powi(2))
+            .sum::<f64>()
+            / original.samples().len() as f64;
+        assert!(
+            mse < 0.001,
+            "Unity formant ratio should be near-identity, MSE={mse}"
+        );
     }
 }

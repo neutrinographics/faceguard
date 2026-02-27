@@ -246,8 +246,6 @@ fn run_audio_processing(
     params: &BlurParams,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use faceguard_core::audio::domain::audio_transformer::AudioTransformer;
-    use faceguard_core::audio::infrastructure::formant_shift_transformer::FormantShiftTransformer;
-    use faceguard_core::audio::infrastructure::pitch_shift_transformer::PitchShiftTransformer;
     use faceguard_core::audio::infrastructure::voice_morph_transformer::VoiceMorphTransformer;
     use faceguard_core::pipeline::process_audio_use_case::ProcessAudioUseCase;
     use faceguard_core::video::infrastructure::ffmpeg_audio_reader::FfmpegAudioReader;
@@ -256,20 +254,13 @@ fn run_audio_processing(
     let reader = Box::new(FfmpegAudioReader);
     let writer = Box::new(FfmpegAudioWriter);
 
-    // Set up voice transformer based on disguise level
+    // Set up voice transformer based on disguise setting
     let transformer: Option<Box<dyn AudioTransformer>> = match params.voice_disguise {
         crate::settings::VoiceDisguise::Off => None,
-        crate::settings::VoiceDisguise::Low => Some(Box::new(PitchShiftTransformer::new(
+        crate::settings::VoiceDisguise::On => Some(Box::new(VoiceMorphTransformer::new(
             faceguard_core::audio::infrastructure::pitch_shift_transformer::DEFAULT_SEMITONES,
-        ))),
-        crate::settings::VoiceDisguise::Medium => Some(Box::new(FormantShiftTransformer::new(
-            faceguard_core::audio::infrastructure::formant_shift_transformer::DEFAULT_FORMANT_SEMITONES,
             faceguard_core::audio::infrastructure::formant_shift_transformer::DEFAULT_FORMANT_SHIFT_RATIO,
-        ))),
-        crate::settings::VoiceDisguise::High => Some(Box::new(VoiceMorphTransformer::new(
-            faceguard_core::audio::infrastructure::voice_morph_transformer::DEFAULT_MORPH_SEMITONES,
-            faceguard_core::audio::infrastructure::voice_morph_transformer::DEFAULT_MORPH_FORMANT_RATIO,
-            faceguard_core::audio::infrastructure::voice_morph_transformer::DEFAULT_JITTER_AMOUNT,
+            faceguard_core::audio::infrastructure::voice_morph_transformer::DEFAULT_CONTOUR_WARP_RANGE,
         ))),
     };
 
