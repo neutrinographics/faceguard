@@ -4,9 +4,7 @@ use crate::audio::domain::audio_segment::AudioSegment;
 use crate::audio::domain::speech_recognizer::SpeechRecognizer;
 use crate::audio::domain::transcript::TranscriptWord;
 
-pub const WHISPER_SAMPLE_RATE: u32 = 16000;
-
-/// Whisper ONNX-based speech recognizer.
+/// Speech recognizer using whisper.cpp via whisper-rs.
 ///
 /// Requires a Whisper ONNX model directory containing the encoder and decoder models.
 /// Full inference implementation is planned — currently returns an empty transcript

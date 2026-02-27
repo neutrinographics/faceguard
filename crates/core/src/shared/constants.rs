@@ -11,5 +11,7 @@ pub const TRACKER_MAX_LOST: usize = 30;
 
 pub const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "bmp", "tiff", "tif", "webp"];
 
-pub const WHISPER_MODEL_FILENAME: &str = "ggml-tiny.en.bin";
+pub const WHISPER_MODEL_NAME: &str = "ggml-tiny.en.bin";
+pub const WHISPER_MODEL_URL: &str =
+    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin";
 pub const WHISPER_SAMPLE_RATE: u32 = 16000;
