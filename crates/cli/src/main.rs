@@ -284,10 +284,34 @@ fn run_video_blur(
             faceguard_core::audio::domain::word_censor::BleepMode::Tone
         };
 
+        let recognizer: Option<
+            Box<dyn faceguard_core::audio::domain::speech_recognizer::SpeechRecognizer>,
+        > = if !keywords.is_empty() {
+            use faceguard_core::audio::infrastructure::whisper_recognizer::WhisperRecognizer;
+            use faceguard_core::shared::constants::{WHISPER_MODEL_NAME, WHISPER_MODEL_URL};
+
+            log::info!("Resolving Whisper model: {WHISPER_MODEL_NAME}");
+            let whisper_path = model_resolver::resolve(
+                WHISPER_MODEL_NAME,
+                WHISPER_MODEL_URL,
+                None,
+                Some(Box::new(|downloaded, total| {
+                    if total > 0 {
+                        let pct = (downloaded as f64 / total as f64 * 100.0) as u32;
+                        eprint!("\rDownloading speech recognition model... {pct}%");
+                    }
+                })),
+            )?;
+            eprintln!();
+            Some(Box::new(WhisperRecognizer::new(&whisper_path)?))
+        } else {
+            None
+        };
+
         let use_case = faceguard_core::pipeline::process_audio_use_case::ProcessAudioUseCase::new(
             Box::new(faceguard_core::video::infrastructure::ffmpeg_audio_reader::FfmpegAudioReader),
             Box::new(faceguard_core::video::infrastructure::ffmpeg_audio_writer::FfmpegAudioWriter),
-            None, // recognizer (Whisper not yet wired in)
+            recognizer,
             transformer,
             keywords,
             bleep_mode,
