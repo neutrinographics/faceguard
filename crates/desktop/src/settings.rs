@@ -48,27 +48,18 @@ impl std::fmt::Display for Appearance {
 #[serde(rename_all = "lowercase")]
 pub enum VoiceDisguise {
     Off,
-    Low,
-    Medium,
-    High,
+    On,
 }
 
 impl VoiceDisguise {
-    pub const ALL: &[VoiceDisguise] = &[
-        VoiceDisguise::Off,
-        VoiceDisguise::Low,
-        VoiceDisguise::Medium,
-        VoiceDisguise::High,
-    ];
+    pub const ALL: &[VoiceDisguise] = &[VoiceDisguise::Off, VoiceDisguise::On];
 }
 
 impl std::fmt::Display for VoiceDisguise {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             VoiceDisguise::Off => write!(f, "Off"),
-            VoiceDisguise::Low => write!(f, "Low"),
-            VoiceDisguise::Medium => write!(f, "Medium"),
-            VoiceDisguise::High => write!(f, "High"),
+            VoiceDisguise::On => write!(f, "On"),
         }
     }
 }

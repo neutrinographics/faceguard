@@ -412,9 +412,7 @@ fn audio_section<'a>(
             Space::new().height(4),
             text(match settings.voice_disguise {
                 VoiceDisguise::Off => "Original voice is preserved.",
-                VoiceDisguise::Low => "Pitch shift only. Changes perceived gender/age.",
-                VoiceDisguise::Medium => "Pitch + formant shift. Harder to identify.",
-                VoiceDisguise::High => {
+                VoiceDisguise::On => {
                     "Full voice morph. Unrecognizable even to forensic analysis."
                 }
             })
