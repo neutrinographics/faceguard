@@ -261,7 +261,6 @@ fn run_video_blur(
             "medium" => {
                 use faceguard_core::audio::infrastructure::formant_shift_transformer::*;
                 Some(Box::new(FormantShiftTransformer::new(
-                    DEFAULT_FORMANT_SEMITONES,
                     DEFAULT_FORMANT_SHIFT_RATIO,
                 )))
             }

@@ -62,7 +62,7 @@ impl Lcg {
 impl VoiceMorphTransformer {
     pub fn new(semitones: f64, formant_ratio: f64, jitter_amount: f64) -> Self {
         Self {
-            formant_shifter: FormantShiftTransformer::new(semitones, formant_ratio),
+            formant_shifter: FormantShiftTransformer::new(formant_ratio),
             jitter_amount,
         }
     }
@@ -243,9 +243,7 @@ mod tests {
         VoiceMorphTransformer::new(4.0, 1.2, DEFAULT_JITTER_AMOUNT)
             .transform(&mut morphed)
             .unwrap();
-        crate::audio::infrastructure::formant_shift_transformer::FormantShiftTransformer::new(
-            4.0, 1.2,
-        )
+        crate::audio::infrastructure::formant_shift_transformer::FormantShiftTransformer::new(1.2)
         .transform(&mut formant_only)
         .unwrap();
 
