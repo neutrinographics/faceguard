@@ -12,7 +12,7 @@ const MIN_F0_HZ: f64 = 60.0;
 const MAX_F0_HZ: f64 = 500.0;
 
 /// Frame size for pitch analysis (~30ms at 16kHz).
-const ANALYSIS_FRAME_SIZE: usize = 512;
+pub(crate) const ANALYSIS_FRAME_SIZE: usize = 512;
 
 /// Hop between analysis frames.
 pub(crate) const ANALYSIS_HOP: usize = 256;

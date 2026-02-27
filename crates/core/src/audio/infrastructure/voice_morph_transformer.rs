@@ -55,12 +55,13 @@ impl Lcg {
 impl AudioTransformer for VoiceMorphTransformer {
     fn transform(&self, audio: &mut AudioSegment) -> Result<(), Box<dyn std::error::Error>> {
         use crate::audio::infrastructure::pitch_shift_transformer::{
-            analyze_pitch, place_pitch_marks, ANALYSIS_HOP, UNVOICED_MARK_SPACING,
+            analyze_pitch, place_pitch_marks, ANALYSIS_FRAME_SIZE, ANALYSIS_HOP,
+            UNVOICED_MARK_SPACING,
         };
 
         let samples: Vec<f64> = audio.samples().iter().map(|&s| s as f64).collect();
         let n = samples.len();
-        if n < 512 {
+        if n < ANALYSIS_FRAME_SIZE {
             return Ok(());
         }
 
