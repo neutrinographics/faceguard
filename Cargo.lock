@@ -1317,7 +1317,7 @@ dependencies = [
 
 [[package]]
 name = "faceguard-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "clap",
  "env_logger",
@@ -1327,7 +1327,7 @@ dependencies = [
 
 [[package]]
 name = "faceguard-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "bytemuck",
@@ -1350,7 +1350,7 @@ dependencies = [
 
 [[package]]
 name = "faceguard-desktop"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "crossbeam-channel",
  "dirs",
