@@ -25,6 +25,7 @@ pub struct FfmpegWriter {
     audio_source_stream_idx: Option<usize>,
     audio_output_stream_idx: Option<usize>,
     audio_source_time_base: Option<ffmpeg_next::Rational>,
+    pub(crate) skip_audio_passthrough: bool,
 }
 
 // Safety: FfmpegWriter is only used from a single thread at a time.
@@ -48,12 +49,17 @@ impl FfmpegWriter {
             audio_source_stream_idx: None,
             audio_output_stream_idx: None,
             audio_source_time_base: None,
+            skip_audio_passthrough: false,
         }
     }
 
     pub fn with_crf(mut self, crf: u32) -> Self {
         self.crf = crf;
         self
+    }
+
+    pub fn set_skip_audio_passthrough(&mut self, skip: bool) {
+        self.skip_audio_passthrough = skip;
     }
 }
 
@@ -83,7 +89,11 @@ impl VideoWriter for FfmpegWriter {
 
         self.video_stream_index = 0;
 
-        let (audio_src, audio_ost, audio_tb) = setup_audio_passthrough(&mut octx, metadata)?;
+        let (audio_src, audio_ost, audio_tb) = if self.skip_audio_passthrough {
+            (None, None, None)
+        } else {
+            setup_audio_passthrough(&mut octx, metadata)?
+        };
         self.audio_source_stream_idx = audio_src;
         self.audio_output_stream_idx = audio_ost;
         self.audio_source_time_base = audio_tb;
@@ -455,5 +465,13 @@ mod tests {
             (avg - 128.0).abs() < 40.0,
             "Average pixel value {avg} should be close to 128"
         );
+    }
+
+    #[test]
+    fn test_skip_audio_passthrough_setter() {
+        let mut writer = FfmpegWriter::new();
+        assert!(!writer.skip_audio_passthrough);
+        writer.set_skip_audio_passthrough(true);
+        assert!(writer.skip_audio_passthrough);
     }
 }
