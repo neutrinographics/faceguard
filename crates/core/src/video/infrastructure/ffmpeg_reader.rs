@@ -248,7 +248,7 @@ fn parse_display_matrix(data: &[u8]) -> Option<i32> {
 
 /// Normalizes an angle to one of 0, 90, 180, or 270.
 fn normalize_rotation(angle: i32) -> i32 {
-    let normalized = ((angle % 360) + 360) % 360;
+    let normalized = angle.rem_euclid(360);
     match normalized {
         0..=44 | 316..=359 => 0,
         45..=134 => 90,
