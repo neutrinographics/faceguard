@@ -103,5 +103,11 @@ These values are contractual and must be preserved exactly:
 | Default lookahead | 5 | BlurFacesUseCase |
 | Thread queue capacity | 4 | BlurFacesUseCase |
 | Preview crop size | 256 | PreviewFacesUseCase |
+| Default semitones | 2.5 | PitchShiftTransformer |
+| Default formant ratio | 1.15 | FormantShiftTransformer |
+| Contour warp range | 0.5 | VoiceMorphTransformer |
+| Voicing threshold | 0.3 | pitch_shift_transformer::detect_pitch |
+| Analysis frame size | 512 | pitch_shift_transformer |
+| Unvoiced mark spacing | 80 | pitch_shift_transformer |
 
 Refer to `PLAN.md` Appendix A for complete formulas and behavioral rules.
