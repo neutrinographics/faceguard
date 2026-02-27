@@ -90,6 +90,10 @@ struct Cli {
     /// Voice disguise level: off, low, medium, high.
     #[arg(long, default_value = "off")]
     voice_disguise: String,
+
+    /// Bleep sound for censored words: tone or silence.
+    #[arg(long, default_value = "tone")]
+    bleep_sound: String,
 }
 
 fn main() {
@@ -115,6 +119,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let quality = cli.quality;
     let audio_keywords = cli.audio_keywords;
     let voice_disguise = cli.voice_disguise;
+    let bleep_sound = cli.bleep_sound;
 
     if let Some(preview_dir) = cli.preview {
         run_preview(&input, &preview_dir, detector)?;
@@ -139,6 +144,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             quality,
             &audio_keywords,
             &voice_disguise,
+            &bleep_sound,
         )?;
     }
 
@@ -206,6 +212,7 @@ fn run_video_blur(
     quality: Option<u32>,
     audio_keywords: &Option<Vec<String>>,
     voice_disguise: &str,
+    bleep_sound: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut reader: Box<dyn VideoReader> = Box::new(FfmpegReader::new());
     let metadata = reader.open(input)?;
@@ -271,12 +278,19 @@ fn run_video_blur(
 
         let keywords = audio_keywords.clone().unwrap_or_default();
 
+        let bleep_mode = if bleep_sound == "silence" {
+            faceguard_core::audio::domain::word_censor::BleepMode::Silence
+        } else {
+            faceguard_core::audio::domain::word_censor::BleepMode::Tone
+        };
+
         let use_case = faceguard_core::pipeline::process_audio_use_case::ProcessAudioUseCase::new(
             Box::new(faceguard_core::video::infrastructure::ffmpeg_audio_reader::FfmpegAudioReader),
             Box::new(faceguard_core::video::infrastructure::ffmpeg_audio_writer::FfmpegAudioWriter),
             None, // recognizer (Whisper not yet wired in)
             transformer,
             keywords,
+            bleep_mode,
         );
         use_case.run(input, output)?;
     }
@@ -363,6 +377,14 @@ fn validate(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!(
             "Voice disguise must be one of: off, low, medium, high, got '{}'",
             cli.voice_disguise
+        )
+        .into());
+    }
+    let valid_bleep_sounds = ["tone", "silence"];
+    if !valid_bleep_sounds.contains(&cli.bleep_sound.as_str()) {
+        return Err(format!(
+            "Bleep sound must be 'tone' or 'silence', got '{}'",
+            cli.bleep_sound
         )
         .into());
     }

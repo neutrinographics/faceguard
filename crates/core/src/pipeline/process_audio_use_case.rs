@@ -3,7 +3,7 @@ use std::path::Path;
 use crate::audio::domain::audio_transformer::AudioTransformer;
 use crate::audio::domain::speech_recognizer::SpeechRecognizer;
 use crate::audio::domain::word_censor::{
-    WordCensor, DEFAULT_BLEEP_FREQUENCY, DEFAULT_BLEEP_PADDING,
+    BleepMode, WordCensor, DEFAULT_BLEEP_FREQUENCY, DEFAULT_BLEEP_PADDING,
 };
 use crate::video::domain::audio_reader::AudioReader;
 use crate::video::domain::audio_writer::AudioWriter;
@@ -14,6 +14,7 @@ pub struct ProcessAudioUseCase {
     recognizer: Option<Box<dyn SpeechRecognizer>>,
     transformer: Option<Box<dyn AudioTransformer>>,
     keywords: Vec<String>,
+    bleep_mode: BleepMode,
 }
 
 impl ProcessAudioUseCase {
@@ -23,6 +24,7 @@ impl ProcessAudioUseCase {
         recognizer: Option<Box<dyn SpeechRecognizer>>,
         transformer: Option<Box<dyn AudioTransformer>>,
         keywords: Vec<String>,
+        bleep_mode: BleepMode,
     ) -> Self {
         Self {
             reader,
@@ -30,6 +32,7 @@ impl ProcessAudioUseCase {
             recognizer,
             transformer,
             keywords,
+            bleep_mode,
         }
     }
 
@@ -53,7 +56,12 @@ impl ProcessAudioUseCase {
                     &self.keywords,
                     DEFAULT_BLEEP_PADDING,
                 );
-                WordCensor::apply_bleep(&mut audio, &regions, DEFAULT_BLEEP_FREQUENCY);
+                WordCensor::apply_bleep(
+                    &mut audio,
+                    &regions,
+                    DEFAULT_BLEEP_FREQUENCY,
+                    self.bleep_mode,
+                );
             }
         }
 
@@ -162,6 +170,7 @@ mod tests {
             None,
             None,
             vec![],
+            BleepMode::Tone,
         );
         uc.run(Path::new("in.mp4"), Path::new("out.mp4")).unwrap();
         assert!(written.lock().unwrap().is_none());
@@ -189,6 +198,7 @@ mod tests {
             Some(Box::new(recognizer)),
             None,
             vec!["secret".to_string()],
+            BleepMode::Tone,
         );
         uc.run(Path::new("in.mp4"), Path::new("out.mp4")).unwrap();
 
@@ -221,6 +231,7 @@ mod tests {
             None,
             Some(Box::new(transformer)),
             vec![],
+            BleepMode::Tone,
         );
         uc.run(Path::new("in.mp4"), Path::new("out.mp4")).unwrap();
         assert!(*called.lock().unwrap());

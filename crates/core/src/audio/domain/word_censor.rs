@@ -5,6 +5,15 @@ use super::transcript::TranscriptWord;
 pub const DEFAULT_BLEEP_PADDING: f64 = 0.05;
 pub const DEFAULT_BLEEP_FREQUENCY: f64 = 1000.0;
 
+/// How censored regions are replaced in the audio.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BleepMode {
+    /// Replace with a sine-wave tone at a given frequency.
+    Tone,
+    /// Replace with silence (zero samples).
+    Silence,
+}
+
 pub struct WordCensor;
 
 impl WordCensor {
@@ -30,7 +39,12 @@ impl WordCensor {
             .collect()
     }
 
-    pub fn apply_bleep(audio: &mut AudioSegment, regions: &[CensorRegion], frequency: f64) {
+    pub fn apply_bleep(
+        audio: &mut AudioSegment,
+        regions: &[CensorRegion],
+        frequency: f64,
+        mode: BleepMode,
+    ) {
         let sample_rate = audio.sample_rate() as f64;
         let channels = audio.channels() as usize;
 
@@ -41,9 +55,18 @@ impl WordCensor {
                 .min(audio.samples().len());
 
             let samples = audio.samples_mut();
-            for (offset, sample) in samples[start..end].iter_mut().enumerate() {
-                let t = offset as f64 / (sample_rate * channels as f64);
-                *sample = (2.0 * std::f64::consts::PI * frequency * t).sin() as f32 * 0.3;
+            match mode {
+                BleepMode::Tone => {
+                    for (offset, sample) in samples[start..end].iter_mut().enumerate() {
+                        let t = offset as f64 / (sample_rate * channels as f64);
+                        *sample = (2.0 * std::f64::consts::PI * frequency * t).sin() as f32 * 0.3;
+                    }
+                }
+                BleepMode::Silence => {
+                    for sample in samples[start..end].iter_mut() {
+                        *sample = 0.0;
+                    }
+                }
             }
         }
     }
@@ -131,7 +154,12 @@ mod tests {
             end_time: 1.0,
             padding: 0.0,
         }];
-        WordCensor::apply_bleep(&mut audio, &regions, DEFAULT_BLEEP_FREQUENCY);
+        WordCensor::apply_bleep(
+            &mut audio,
+            &regions,
+            DEFAULT_BLEEP_FREQUENCY,
+            BleepMode::Tone,
+        );
 
         let start = audio.sample_index_at_time(0.5);
         let end = audio.sample_index_at_time(1.0);
@@ -153,7 +181,12 @@ mod tests {
             end_time: 1.0,
             padding: 0.0,
         }];
-        WordCensor::apply_bleep(&mut audio, &regions, DEFAULT_BLEEP_FREQUENCY);
+        WordCensor::apply_bleep(
+            &mut audio,
+            &regions,
+            DEFAULT_BLEEP_FREQUENCY,
+            BleepMode::Tone,
+        );
 
         let before_energy: f64 = audio.samples()[0..8000]
             .iter()
@@ -170,7 +203,12 @@ mod tests {
             end_time: 1.5,
             padding: 0.1,
         }];
-        WordCensor::apply_bleep(&mut audio, &regions, DEFAULT_BLEEP_FREQUENCY);
+        WordCensor::apply_bleep(
+            &mut audio,
+            &regions,
+            DEFAULT_BLEEP_FREQUENCY,
+            BleepMode::Tone,
+        );
 
         let idx = audio.sample_index_at_time(0.95);
         assert!(audio.samples()[idx].abs() > 0.0);
@@ -180,7 +218,37 @@ mod tests {
     fn test_apply_bleep_empty_regions_no_change() {
         let mut audio = silent_segment(1.0, 16000);
         let original = audio.samples().to_vec();
-        WordCensor::apply_bleep(&mut audio, &[], DEFAULT_BLEEP_FREQUENCY);
+        WordCensor::apply_bleep(&mut audio, &[], DEFAULT_BLEEP_FREQUENCY, BleepMode::Tone);
         assert_eq!(audio.samples(), &original[..]);
+    }
+
+    #[test]
+    fn test_apply_bleep_silence_zeroes_region() {
+        let mut audio = AudioSegment::new(vec![0.5f32; 32000], 16000, 1);
+        let regions = vec![CensorRegion {
+            start_time: 0.5,
+            end_time: 1.0,
+            padding: 0.0,
+        }];
+        WordCensor::apply_bleep(
+            &mut audio,
+            &regions,
+            DEFAULT_BLEEP_FREQUENCY,
+            BleepMode::Silence,
+        );
+
+        let start = audio.sample_index_at_time(0.5);
+        let end = audio.sample_index_at_time(1.0);
+
+        // Censored region should be all zeros
+        let region_energy: f64 = audio.samples()[start..end]
+            .iter()
+            .map(|s| (*s as f64).powi(2))
+            .sum();
+        assert_relative_eq!(region_energy, 0.0);
+
+        // Before and after should still be non-zero
+        assert!(audio.samples()[0].abs() > 0.0);
+        assert!(audio.samples()[end + 1].abs() > 0.0);
     }
 }

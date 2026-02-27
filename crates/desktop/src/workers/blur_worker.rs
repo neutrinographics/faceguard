@@ -40,7 +40,6 @@ pub enum WorkerMessage {
     Cancelled,
 }
 
-#[allow(dead_code)]
 pub struct BlurParams {
     pub input_path: PathBuf,
     pub output_path: PathBuf,
@@ -292,7 +291,23 @@ fn run_audio_processing(
         Box<dyn faceguard_core::audio::domain::speech_recognizer::SpeechRecognizer>,
     > = None;
 
-    let use_case = ProcessAudioUseCase::new(reader, writer, recognizer, transformer, keywords);
+    let bleep_mode = match params.bleep_sound {
+        crate::settings::BleepSound::Tone => {
+            faceguard_core::audio::domain::word_censor::BleepMode::Tone
+        }
+        crate::settings::BleepSound::Silence => {
+            faceguard_core::audio::domain::word_censor::BleepMode::Silence
+        }
+    };
+
+    let use_case = ProcessAudioUseCase::new(
+        reader,
+        writer,
+        recognizer,
+        transformer,
+        keywords,
+        bleep_mode,
+    );
     use_case.run(input, output)?;
 
     Ok(())
