@@ -29,7 +29,11 @@
       "Bash(git stash:*)",
       "Bash(git checkout:*)",
       "Bash(git:*)",
-      "Bash(pkg-config:*)"
+      "Bash(pkg-config:*)",
+      "Bash(GGML_NO_NATIVE=1 cargo check:*)",
+      "Bash(cargo clean:*)",
+      "Bash(ls:*)",
+      "Bash(ffmpeg:*)"
     ]
   }
 }
