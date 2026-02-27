@@ -25,7 +25,7 @@ const VOICING_THRESHOLD: f64 = 0.3;
 const UNVOICED_MARK_SPACING: usize = 80;
 
 /// Result of analyzing one frame for pitch.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 struct PitchFrame {
     /// True if the frame is voiced (periodic).
     voiced: bool,
@@ -55,7 +55,7 @@ fn detect_pitch(frame: &[f64], sample_rate: u32) -> PitchFrame {
     let max_lag = (sample_rate as f64 / MIN_F0_HZ).ceil() as usize;
     let max_lag = max_lag.min(n - 1);
 
-    if min_lag >= max_lag || max_lag >= n {
+    if min_lag >= max_lag {
         return PitchFrame {
             voiced: false,
             period_samples: UNVOICED_MARK_SPACING,
@@ -98,9 +98,157 @@ impl PitchShiftTransformer {
     }
 }
 
+/// Analyze the entire signal and return per-frame pitch information.
+fn analyze_pitch(samples: &[f64], sample_rate: u32) -> Vec<PitchFrame> {
+    let n = samples.len();
+    let mut frames = Vec::new();
+    let mut pos = 0;
+    while pos + ANALYSIS_FRAME_SIZE <= n {
+        frames.push(detect_pitch(&samples[pos..pos + ANALYSIS_FRAME_SIZE], sample_rate));
+        pos += ANALYSIS_HOP;
+    }
+    frames
+}
+
+/// Place pitch marks throughout the signal based on detected pitch.
+/// Returns sample indices where each pitch mark is placed.
+fn place_pitch_marks(samples: &[f64], pitch_frames: &[PitchFrame]) -> Vec<usize> {
+    let n = samples.len();
+    if n == 0 {
+        return Vec::new();
+    }
+
+    let mut marks = Vec::new();
+    let mut pos: usize = 0;
+
+    while pos < n {
+        marks.push(pos);
+        let frame_idx = (pos / ANALYSIS_HOP).min(pitch_frames.len().saturating_sub(1));
+        let period = if frame_idx < pitch_frames.len() && pitch_frames[frame_idx].voiced {
+            pitch_frames[frame_idx].period_samples
+        } else {
+            UNVOICED_MARK_SPACING
+        };
+        pos += period.max(1);
+    }
+    marks
+}
+
+/// PSOLA synthesis: given analysis marks and a shift ratio, produce output.
+/// shift_ratio > 1 means higher pitch (shorter periods).
+fn psola_synthesize(
+    samples: &[f64],
+    analysis_marks: &[usize],
+    pitch_frames: &[PitchFrame],
+    shift_ratio: f64,
+) -> Vec<f64> {
+    let n = samples.len();
+    let mut output = vec![0.0f64; n];
+    let mut window_sum = vec![0.0f64; n];
+
+    if analysis_marks.is_empty() {
+        return output;
+    }
+
+    // Compute synthesis marks by adjusting spacing
+    let mut synthesis_marks = Vec::with_capacity(analysis_marks.len());
+    synthesis_marks.push(0.0f64);
+
+    for i in 1..analysis_marks.len() {
+        let analysis_spacing = analysis_marks[i] as f64 - analysis_marks[i - 1] as f64;
+        let synthesis_spacing = analysis_spacing / shift_ratio;
+        let prev_synth = synthesis_marks[i - 1];
+        synthesis_marks.push(prev_synth + synthesis_spacing);
+    }
+
+    // For each analysis mark, extract a windowed grain and place it at the synthesis mark
+    for (i, &analysis_pos) in analysis_marks.iter().enumerate() {
+        let frame_idx =
+            (analysis_pos / ANALYSIS_HOP).min(pitch_frames.len().saturating_sub(1));
+        let local_period = if frame_idx < pitch_frames.len() && pitch_frames[frame_idx].voiced {
+            pitch_frames[frame_idx].period_samples
+        } else {
+            UNVOICED_MARK_SPACING
+        };
+
+        let half_win = local_period;
+        let win_size = 2 * half_win;
+        if win_size == 0 {
+            continue;
+        }
+
+        let hann: Vec<f64> = (0..win_size)
+            .map(|j| 0.5 * (1.0 - (2.0 * PI * j as f64 / win_size as f64).cos()))
+            .collect();
+
+        let grain_start = analysis_pos.saturating_sub(half_win);
+        let grain_end = (analysis_pos + half_win).min(n);
+
+        let synth_center = synthesis_marks[i];
+        let synth_start = synth_center - half_win as f64;
+
+        for j in 0..(grain_end - grain_start) {
+            let src_idx = grain_start + j;
+            let dst_f = synth_start + j as f64;
+            let dst_idx = dst_f.round() as i64;
+            if dst_idx >= 0 && (dst_idx as usize) < n {
+                let d = dst_idx as usize;
+                let win_idx = if analysis_pos >= half_win {
+                    j
+                } else {
+                    j + (half_win - analysis_pos)
+                };
+                if win_idx < win_size {
+                    output[d] += samples[src_idx] * hann[win_idx];
+                    window_sum[d] += hann[win_idx];
+                }
+            }
+        }
+    }
+
+    // Normalize by window sum
+    for i in 0..n {
+        if window_sum[i] > 1e-10 {
+            output[i] /= window_sum[i];
+        }
+    }
+
+    output
+}
+
 impl AudioTransformer for PitchShiftTransformer {
-    fn transform(&self, _audio: &mut AudioSegment) -> Result<(), Box<dyn std::error::Error>> {
-        todo!()
+    fn transform(&self, audio: &mut AudioSegment) -> Result<(), Box<dyn std::error::Error>> {
+        if self.semitones.abs() < 1e-10 {
+            return Ok(());
+        }
+
+        let samples: Vec<f64> = audio.samples().iter().map(|&s| s as f64).collect();
+        let n = samples.len();
+        if n < ANALYSIS_FRAME_SIZE {
+            return Ok(());
+        }
+
+        let shift_ratio = 2.0_f64.powf(self.semitones / 12.0);
+        let sample_rate = audio.sample_rate();
+
+        let pitch_frames = analyze_pitch(&samples, sample_rate);
+        let analysis_marks = place_pitch_marks(&samples, &pitch_frames);
+        let output = psola_synthesize(&samples, &analysis_marks, &pitch_frames, shift_ratio);
+
+        let input_peak = samples.iter().map(|s| s.abs()).fold(0.0f64, f64::max);
+        let output_peak = output.iter().map(|s| s.abs()).fold(0.0f64, f64::max);
+        let gain = if output_peak > 1e-10 && output_peak > input_peak {
+            input_peak / output_peak
+        } else {
+            1.0
+        };
+
+        let out_samples = audio.samples_mut();
+        for i in 0..n {
+            out_samples[i] = (output[i] * gain) as f32;
+        }
+
+        Ok(())
     }
 }
 
@@ -137,7 +285,7 @@ mod tests {
         // Period should be ~160 samples (16000/100)
         let expected_period = 160;
         assert!(
-            (result.period_samples as i32 - expected_period as i32).unsigned_abs() <= 3,
+            (result.period_samples as i32 - expected_period).unsigned_abs() <= 3,
             "Expected period ~{expected_period}, got {}",
             result.period_samples
         );
@@ -151,7 +299,7 @@ mod tests {
         assert!(result.voiced);
         let expected_period = 80; // 16000/200
         assert!(
-            (result.period_samples as i32 - expected_period as i32).unsigned_abs() <= 2,
+            (result.period_samples as i32 - expected_period).unsigned_abs() <= 2,
             "Expected period ~{expected_period}, got {}",
             result.period_samples
         );
@@ -181,5 +329,67 @@ mod tests {
         let silence = vec![0.0f64; ANALYSIS_FRAME_SIZE];
         let result = detect_pitch(&silence, 16000);
         assert!(!result.voiced, "Silence should be classified as unvoiced");
+    }
+
+    #[test]
+    fn test_psola_shift_changes_audio() {
+        let original = sine_segment(150.0, 1.0, 16000);
+        let mut shifted = original.clone();
+        let transformer = PitchShiftTransformer::new(DEFAULT_SEMITONES);
+        transformer.transform(&mut shifted).unwrap();
+        let diff: f64 = original
+            .samples()
+            .iter()
+            .zip(shifted.samples().iter())
+            .map(|(a, b)| ((*a - *b) as f64).powi(2))
+            .sum();
+        assert!(
+            diff > 0.0,
+            "Pitch-shifted audio should differ from original"
+        );
+    }
+
+    #[test]
+    fn test_psola_shift_preserves_length() {
+        let mut audio = sine_segment(150.0, 1.0, 16000);
+        let original_len = audio.samples().len();
+        let transformer = PitchShiftTransformer::new(DEFAULT_SEMITONES);
+        transformer.transform(&mut audio).unwrap();
+        assert_eq!(audio.samples().len(), original_len);
+    }
+
+    #[test]
+    fn test_psola_shift_preserves_amplitude_range() {
+        let mut audio = sine_segment(150.0, 1.0, 16000);
+        let transformer = PitchShiftTransformer::new(DEFAULT_SEMITONES);
+        transformer.transform(&mut audio).unwrap();
+        let max = audio
+            .samples()
+            .iter()
+            .map(|s| s.abs())
+            .fold(0.0f32, f32::max);
+        assert!(
+            max <= 1.5,
+            "Output should not clip excessively, got max={max}"
+        );
+    }
+
+    #[test]
+    fn test_zero_semitones_near_identity() {
+        let original = sine_segment(150.0, 1.0, 16000);
+        let mut shifted = original.clone();
+        let transformer = PitchShiftTransformer::new(0.0);
+        transformer.transform(&mut shifted).unwrap();
+        let diff: f64 = original
+            .samples()
+            .iter()
+            .zip(shifted.samples().iter())
+            .map(|(a, b)| ((*a - *b) as f64).powi(2))
+            .sum::<f64>()
+            / original.samples().len() as f64;
+        assert!(
+            diff < 0.01,
+            "Zero shift should be near-identity, MSE={diff}"
+        );
     }
 }
