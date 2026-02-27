@@ -47,30 +47,39 @@ impl ProcessAudioUseCase {
             None => return Ok(()), // No audio track — skip
         };
 
-        // 2. Transcribe + bleep (if keywords provided)
-        if !self.keywords.is_empty() {
+        // 2. Transcribe keywords on the original audio (before voice transform)
+        let censor_regions = if !self.keywords.is_empty() {
             if let Some(ref recognizer) = self.recognizer {
                 let transcript = recognizer.transcribe(&audio)?;
-                let regions = WordCensor::find_censor_regions(
+                WordCensor::find_censor_regions(
                     &transcript,
                     &self.keywords,
                     DEFAULT_BLEEP_PADDING,
-                );
-                WordCensor::apply_bleep(
-                    &mut audio,
-                    &regions,
-                    DEFAULT_BLEEP_FREQUENCY,
-                    self.bleep_mode,
-                );
+                )
+            } else {
+                Vec::new()
             }
-        }
+        } else {
+            Vec::new()
+        };
 
-        // 3. Voice transform (if enabled)
+        // 3. Voice transform (if enabled) — must happen before bleeping,
+        //    otherwise PSOLA overlap-add corrupts the bleep tones
         if let Some(ref transformer) = self.transformer {
             transformer.transform(&mut audio)?;
         }
 
-        // 4. Write processed audio to output
+        // 4. Apply bleeps after voice transform so they cleanly overwrite
+        if !censor_regions.is_empty() {
+            WordCensor::apply_bleep(
+                &mut audio,
+                &censor_regions,
+                DEFAULT_BLEEP_FREQUENCY,
+                self.bleep_mode,
+            );
+        }
+
+        // 5. Write processed audio to output
         self.writer.write_audio(output_path, &audio)?;
 
         Ok(())
