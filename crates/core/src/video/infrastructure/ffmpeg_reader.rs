@@ -65,6 +65,7 @@ impl VideoReader for FfmpegReader {
                 .map(|c| c.name().to_string())
                 .unwrap_or_default(),
             source_path: Some(path.to_path_buf()),
+            rotation: 0,
         };
 
         self.video_stream_index = video_stream_index;

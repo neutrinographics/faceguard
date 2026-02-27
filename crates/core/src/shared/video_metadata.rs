@@ -8,6 +8,7 @@ pub struct VideoMetadata {
     pub total_frames: usize,
     pub codec: String,
     pub source_path: Option<PathBuf>,
+    pub rotation: i32,
 }
 
 #[cfg(test)]
@@ -23,6 +24,7 @@ mod tests {
             total_frames: 900,
             codec: "h264".to_string(),
             source_path: Some(PathBuf::from("/tmp/test.mp4")),
+            rotation: 0,
         };
         assert_eq!(meta.width, 1920);
         assert_eq!(meta.height, 1080);
@@ -41,6 +43,7 @@ mod tests {
             total_frames: 100,
             codec: "vp9".to_string(),
             source_path: None,
+            rotation: 0,
         };
         let cloned = meta.clone();
         assert_eq!(meta, cloned);
@@ -56,6 +59,7 @@ mod tests {
             total_frames: 1,
             codec: "png".to_string(),
             source_path: None,
+            rotation: 0,
         };
         assert_eq!(meta.total_frames, 1);
         assert_eq!(meta.fps, 0.0);
