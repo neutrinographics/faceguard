@@ -285,11 +285,29 @@ fn run_audio_processing(
             .collect()
     };
 
-    // Set up recognizer (only needed if keywords are provided)
-    // For now, returns None until full inference is implemented
     let recognizer: Option<
         Box<dyn faceguard_core::audio::domain::speech_recognizer::SpeechRecognizer>,
-    > = None;
+    > = if !keywords.is_empty() {
+        use faceguard_core::audio::infrastructure::whisper_recognizer::WhisperRecognizer;
+        match params
+            .model_cache
+            .wait_for_whisper(&|_, _| {}, &AtomicBool::new(false))
+        {
+            Ok(model_path) => match WhisperRecognizer::new(&model_path) {
+                Ok(r) => Some(Box::new(r)),
+                Err(e) => {
+                    log::warn!("Failed to create WhisperRecognizer: {e}");
+                    None
+                }
+            },
+            Err(e) => {
+                log::warn!("Whisper model not available: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     let bleep_mode = match params.bleep_sound {
         crate::settings::BleepSound::Tone => {
