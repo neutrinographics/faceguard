@@ -227,18 +227,18 @@ fn extract_rotation(stream: &ffmpeg_next::format::stream::Stream) -> i32 {
 /// Parses a 3x3 display matrix (9 x i32, 16.16 fixed-point) to extract
 /// the rotation angle in degrees.
 ///
-/// The matrix is stored as 9 consecutive i32 values in little-endian format.
-/// Rotation is derived from atan2(matrix[3], matrix[0]) which gives the angle
-/// of the first row vector. The result is negated because the display matrix
-/// represents the transformation needed to display correctly (inverse of the
-/// actual rotation).
+/// The matrix is stored as 9 consecutive i32 values in native byte order
+/// (as returned by the ffmpeg API). Rotation is derived from
+/// atan2(matrix[1], matrix[0]) which gives the angle of the first row vector.
+/// The result is negated because the display matrix represents the
+/// transformation needed to display correctly (inverse of actual rotation).
 fn parse_display_matrix(data: &[u8]) -> Option<i32> {
     if data.len() < 36 {
         return None;
     }
 
-    let m00 = i32::from_le_bytes(data[0..4].try_into().ok()?) as f64 / 65536.0;
-    let m10 = i32::from_le_bytes(data[4..8].try_into().ok()?) as f64 / 65536.0;
+    let m00 = i32::from_ne_bytes(data[0..4].try_into().ok()?) as f64 / 65536.0;
+    let m10 = i32::from_ne_bytes(data[4..8].try_into().ok()?) as f64 / 65536.0;
 
     let angle_rad = m10.atan2(m00);
     let angle_deg = -angle_rad.to_degrees().round() as i32;
@@ -465,8 +465,8 @@ mod tests {
         let mut data = vec![0u8; 36];
         let m00: i32 = 0; // cos(90°) = 0
         let m10: i32 = 65536; // sin(90°) = 1
-        data[0..4].copy_from_slice(&m00.to_le_bytes());
-        data[4..8].copy_from_slice(&m10.to_le_bytes());
+        data[0..4].copy_from_slice(&m00.to_ne_bytes());
+        data[4..8].copy_from_slice(&m10.to_ne_bytes());
 
         // atan2(65536, 0) = π/2 ≈ 90°, negated = -90°, normalized = 270
         // But phone videos use the convention where the matrix stores
@@ -484,7 +484,7 @@ mod tests {
         // Identity matrix = no rotation
         let mut data = vec![0u8; 36];
         let one: i32 = 65536; // 1.0 in 16.16 fixed point
-        data[0..4].copy_from_slice(&one.to_le_bytes());
+        data[0..4].copy_from_slice(&one.to_ne_bytes());
         // m10 = 0 (already zeroed)
         let angle = parse_display_matrix(&data).unwrap();
         assert_eq!(normalize_rotation(angle), 0);
@@ -509,6 +509,96 @@ mod tests {
         assert_eq!(normalize_rotation(44), 0);
         assert_eq!(normalize_rotation(315), 270);
         assert_eq!(normalize_rotation(316), 0);
+    }
+
+    #[test]
+    fn test_open_reads_rotation_from_rotated_video() {
+        // Create a test video, then modify its tkhd matrix to represent 90° rotation
+        let dir = tempfile::tempdir().unwrap();
+        let path = test_video_path(dir.path());
+        create_test_video(&path, 3, 160, 120, 30.0);
+
+        // Read the MP4 and inject a 90° rotation matrix into the tkhd atom
+        let mut data = std::fs::read(&path).unwrap();
+        if let Some(tkhd_pos) = find_atom(&data, b"tkhd") {
+            // tkhd v0 matrix offset: after version(1)+flags(3)+creation(4)+modification(4)+
+            // track_id(4)+reserved(4)+duration(4)+reserved(8)+layer(2)+alt_group(2)+
+            // volume(2)+reserved(2) = 40 bytes from atom data start
+            let matrix_offset = tkhd_pos + 4 + 40; // +4 for atom type field
+                                                   // 90° CW: cos=0, sin=65536, last element is 2.30 fixed point
+            let matrix_90: [i32; 9] = [0, 65536, 0, -65536, 0, 0, 0, 0, 0x40000000];
+            for (i, &val) in matrix_90.iter().enumerate() {
+                let bytes = val.to_be_bytes();
+                data[matrix_offset + i * 4..matrix_offset + i * 4 + 4].copy_from_slice(&bytes);
+            }
+            std::fs::write(&path, &data).unwrap();
+        } else {
+            panic!("No tkhd atom found in test video");
+        }
+
+        let mut reader = FfmpegReader::new();
+        let meta = reader.open(&path).unwrap();
+        assert!(
+            meta.rotation == 90 || meta.rotation == 270,
+            "Expected 90 or 270 rotation, got {}",
+            meta.rotation
+        );
+    }
+
+    /// Find the position of a 4-byte atom type in MP4 data.
+    fn find_atom(data: &[u8], atom_type: &[u8; 4]) -> Option<usize> {
+        data.windows(4).position(|w| w == atom_type)
+    }
+
+    #[test]
+    fn test_roundtrip_preserves_rotation() {
+        use crate::video::domain::video_writer::VideoWriter;
+        use crate::video::infrastructure::ffmpeg_writer::FfmpegWriter;
+
+        // Create a base test video
+        let dir = tempfile::tempdir().unwrap();
+        let input_path = dir.path().join("input.mp4");
+        create_test_video(&input_path, 3, 160, 120, 30.0);
+
+        // Inject 90° rotation into tkhd
+        let mut data = std::fs::read(&input_path).unwrap();
+        if let Some(tkhd_pos) = find_atom(&data, b"tkhd") {
+            let matrix_offset = tkhd_pos + 4 + 40;
+            let matrix_90: [i32; 9] = [0, 65536, 0, -65536, 0, 0, 0, 0, 0x40000000];
+            for (i, &val) in matrix_90.iter().enumerate() {
+                data[matrix_offset + i * 4..matrix_offset + i * 4 + 4]
+                    .copy_from_slice(&val.to_be_bytes());
+            }
+            std::fs::write(&input_path, &data).unwrap();
+        }
+
+        // Read input (should have rotation)
+        let mut reader = FfmpegReader::new();
+        let meta = reader.open(&input_path).unwrap();
+        assert!(
+            meta.rotation == 90 || meta.rotation == 270,
+            "Input rotation: {}",
+            meta.rotation
+        );
+
+        // Write output with same metadata
+        let output_path = dir.path().join("output.mp4");
+        let mut writer = FfmpegWriter::new();
+        writer.set_skip_audio_passthrough(true);
+        writer.open(&output_path, &meta).unwrap();
+        for frame in reader.frames() {
+            writer.write(&frame.unwrap()).unwrap();
+        }
+        writer.close().unwrap();
+
+        // Read back and verify rotation is preserved
+        let mut reader2 = FfmpegReader::new();
+        let meta2 = reader2.open(&output_path).unwrap();
+        assert_eq!(
+            meta.rotation, meta2.rotation,
+            "Rotation not preserved! Input: {}, Output: {}",
+            meta.rotation, meta2.rotation
+        );
     }
 
     #[test]

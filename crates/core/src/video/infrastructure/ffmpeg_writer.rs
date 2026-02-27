@@ -99,11 +99,7 @@ impl VideoWriter for FfmpegWriter {
         self.audio_source_time_base = audio_tb;
 
         if metadata.rotation != 0 {
-            if let Some(mut video_stream) = octx.stream_mut(self.video_stream_index) {
-                let mut dict = ffmpeg_next::Dictionary::new();
-                dict.set("rotate", &metadata.rotation.to_string());
-                video_stream.set_metadata(dict);
-            }
+            set_stream_display_matrix(&mut octx, self.video_stream_index, metadata.rotation);
         }
 
         octx.write_header()?;
@@ -330,6 +326,44 @@ fn mux_audio_from_source(
         if let Err(e) = packet.write_interleaved(octx) {
             log::warn!("Failed to write audio packet: {e}");
             break;
+        }
+    }
+}
+
+/// Sets a display matrix on an output stream to encode the given rotation angle.
+///
+/// Uses the raw FFmpeg C API (`av_stream_new_side_data`) because the
+/// ffmpeg-next bindings don't expose stream-level side data writes.
+/// The display matrix is a 3×3 transformation stored as 9 × i32 values:
+/// the first 6 in 16.16 fixed-point, the last 3 in 2.30 fixed-point.
+fn set_stream_display_matrix(
+    octx: &mut ffmpeg_next::format::context::Output,
+    stream_index: usize,
+    rotation_degrees: i32,
+) {
+    use ffmpeg_next::sys::{av_stream_new_side_data, AVPacketSideDataType};
+
+    let angle_rad = -(rotation_degrees as f64).to_radians();
+    let cos_val = (angle_rad.cos() * 65536.0).round() as i32;
+    let sin_val = (angle_rad.sin() * 65536.0).round() as i32;
+
+    // Display matrix layout (row-major):
+    //   [cos, sin, 0]
+    //   [-sin, cos, 0]
+    //   [0,    0,   1]  (2.30 fixed point for last row)
+    let matrix: [i32; 9] = [cos_val, sin_val, 0, -sin_val, cos_val, 0, 0, 0, 0x40000000];
+
+    unsafe {
+        let stream_ptr = (*octx.as_mut_ptr()).streams.add(stream_index).read();
+        let data_ptr = av_stream_new_side_data(
+            stream_ptr,
+            AVPacketSideDataType::AV_PKT_DATA_DISPLAYMATRIX,
+            36,
+        );
+        if !data_ptr.is_null() {
+            for (i, &val) in matrix.iter().enumerate() {
+                std::ptr::copy_nonoverlapping(val.to_ne_bytes().as_ptr(), data_ptr.add(i * 4), 4);
+            }
         }
     }
 }
