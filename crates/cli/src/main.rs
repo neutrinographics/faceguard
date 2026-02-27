@@ -266,10 +266,12 @@ fn run_video_blur(
             }
             "high" => {
                 use faceguard_core::audio::infrastructure::voice_morph_transformer::*;
+                use faceguard_core::audio::infrastructure::pitch_shift_transformer::DEFAULT_SEMITONES;
+                use faceguard_core::audio::infrastructure::formant_shift_transformer::DEFAULT_FORMANT_SHIFT_RATIO;
                 Some(Box::new(VoiceMorphTransformer::new(
-                    DEFAULT_MORPH_SEMITONES,
-                    DEFAULT_MORPH_FORMANT_RATIO,
-                    DEFAULT_JITTER_AMOUNT,
+                    DEFAULT_SEMITONES,
+                    DEFAULT_FORMANT_SHIFT_RATIO,
+                    DEFAULT_CONTOUR_WARP_RANGE,
                 )))
             }
             _ => None,

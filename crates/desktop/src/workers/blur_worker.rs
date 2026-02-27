@@ -266,9 +266,9 @@ fn run_audio_processing(
             faceguard_core::audio::infrastructure::formant_shift_transformer::DEFAULT_FORMANT_SHIFT_RATIO,
         ))),
         crate::settings::VoiceDisguise::High => Some(Box::new(VoiceMorphTransformer::new(
-            faceguard_core::audio::infrastructure::voice_morph_transformer::DEFAULT_MORPH_SEMITONES,
-            faceguard_core::audio::infrastructure::voice_morph_transformer::DEFAULT_MORPH_FORMANT_RATIO,
-            faceguard_core::audio::infrastructure::voice_morph_transformer::DEFAULT_JITTER_AMOUNT,
+            faceguard_core::audio::infrastructure::pitch_shift_transformer::DEFAULT_SEMITONES,
+            faceguard_core::audio::infrastructure::formant_shift_transformer::DEFAULT_FORMANT_SHIFT_RATIO,
+            faceguard_core::audio::infrastructure::voice_morph_transformer::DEFAULT_CONTOUR_WARP_RANGE,
         ))),
     };
 

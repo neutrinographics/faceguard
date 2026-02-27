@@ -15,22 +15,22 @@ const MAX_F0_HZ: f64 = 500.0;
 const ANALYSIS_FRAME_SIZE: usize = 512;
 
 /// Hop between analysis frames.
-const ANALYSIS_HOP: usize = 256;
+pub(crate) const ANALYSIS_HOP: usize = 256;
 
 /// Voicing threshold: normalized autocorrelation peak must exceed this
 /// to classify a frame as voiced.
 const VOICING_THRESHOLD: f64 = 0.3;
 
 /// Fixed pitch mark spacing for unvoiced segments (in samples at 16kHz = ~5ms).
-const UNVOICED_MARK_SPACING: usize = 80;
+pub(crate) const UNVOICED_MARK_SPACING: usize = 80;
 
 /// Result of analyzing one frame for pitch.
 #[derive(Clone, Debug, PartialEq)]
-struct PitchFrame {
+pub(crate) struct PitchFrame {
     /// True if the frame is voiced (periodic).
-    voiced: bool,
+    pub(crate) voiced: bool,
     /// Detected pitch period in samples (only meaningful if voiced).
-    period_samples: usize,
+    pub(crate) period_samples: usize,
 }
 
 /// Detect pitch in a single frame using autocorrelation.
@@ -99,7 +99,7 @@ impl PitchShiftTransformer {
 }
 
 /// Analyze the entire signal and return per-frame pitch information.
-fn analyze_pitch(samples: &[f64], sample_rate: u32) -> Vec<PitchFrame> {
+pub(crate) fn analyze_pitch(samples: &[f64], sample_rate: u32) -> Vec<PitchFrame> {
     let n = samples.len();
     let mut frames = Vec::new();
     let mut pos = 0;
@@ -112,7 +112,7 @@ fn analyze_pitch(samples: &[f64], sample_rate: u32) -> Vec<PitchFrame> {
 
 /// Place pitch marks throughout the signal based on detected pitch.
 /// Returns sample indices where each pitch mark is placed.
-fn place_pitch_marks(samples: &[f64], pitch_frames: &[PitchFrame]) -> Vec<usize> {
+pub(crate) fn place_pitch_marks(samples: &[f64], pitch_frames: &[PitchFrame]) -> Vec<usize> {
     let n = samples.len();
     if n == 0 {
         return Vec::new();
