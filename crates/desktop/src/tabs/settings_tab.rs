@@ -1,8 +1,8 @@
-use iced::widget::{button, checkbox, column, container, row, slider, text, Space};
+use iced::widget::{button, checkbox, column, container, row, slider, text, text_input, Space};
 use iced::{Color, Element, Length, Theme};
 
 use crate::app::{scaled, Message};
-use crate::settings::{Appearance, BlurShape, Settings};
+use crate::settings::{Appearance, BleepSound, BlurShape, Settings, VoiceDisguise};
 use crate::theme::{muted_color, section_color, surface_color, tertiary_color};
 use crate::widgets::secondary_button;
 
@@ -42,6 +42,8 @@ pub fn view<'a>(
         ),
         Space::new().height(28),
         detection_section(settings, fs, muted, section, tertiary, surface, border, accent),
+        Space::new().height(28),
+        audio_section(settings, fs, muted, section, tertiary, surface, border, accent),
         Space::new().height(28),
         appearance_section(settings, fs, section, tertiary, surface, border, accent),
         Space::new().height(24),
@@ -306,6 +308,134 @@ fn detection_section<'a>(
         sensitivity_card,
         Space::new().height(10),
         lookahead_card,
+    ]
+    .spacing(0)
+    .into()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn audio_section<'a>(
+    settings: &Settings,
+    fs: f32,
+    _muted: iced::Color,
+    section: iced::Color,
+    tertiary: iced::Color,
+    surface: iced::Color,
+    border: iced::Color,
+    accent: iced::Color,
+) -> Element<'a, Message> {
+    // Audio processing toggle
+    let toggle_card = setting_card(
+        column![
+            checkbox(settings.audio_processing)
+                .label("Enable audio processing")
+                .on_toggle(Message::AudioProcessingChanged)
+                .text_size(scaled(15.0, fs)),
+            Space::new().height(4),
+            text("Process audio when blurring videos. Leave off to keep original audio.")
+                .size(scaled(14.0, fs))
+                .color(tertiary),
+        ]
+        .spacing(0),
+        surface,
+        border,
+    );
+
+    // Keywords input
+    let keywords_card = setting_card(
+        column![
+            setting_name("Bleep keywords", fs),
+            Space::new().height(4),
+            text("Comma-separated words to bleep out (requires speech recognition model).")
+                .size(scaled(14.0, fs))
+                .color(tertiary),
+            Space::new().height(8),
+            text_input("e.g. name, address, phone", &settings.bleep_keywords)
+                .on_input(Message::BleepKeywordsChanged)
+                .size(scaled(14.0, fs)),
+        ]
+        .spacing(0),
+        surface,
+        border,
+    );
+
+    // Bleep sound pills
+    let bleep_pills: Element<'a, Message> = row(BleepSound::ALL.iter().map(|&variant| {
+        pill_button(
+            variant.to_string(),
+            variant == settings.bleep_sound,
+            Message::BleepSoundChanged(variant),
+            fs,
+            accent,
+            border,
+            tertiary,
+        )
+    }))
+    .spacing(8)
+    .into();
+
+    let bleep_card = setting_card(
+        column![
+            setting_name("Bleep sound", fs),
+            Space::new().height(8),
+            bleep_pills,
+            Space::new().height(4),
+            text("What replaces bleeped words.")
+                .size(scaled(14.0, fs))
+                .color(tertiary),
+        ]
+        .spacing(0),
+        surface,
+        border,
+    );
+
+    // Voice disguise pills
+    let voice_pills: Element<'a, Message> = row(VoiceDisguise::ALL.iter().map(|&variant| {
+        pill_button(
+            variant.to_string(),
+            variant == settings.voice_disguise,
+            Message::VoiceDisguiseChanged(variant),
+            fs,
+            accent,
+            border,
+            tertiary,
+        )
+    }))
+    .spacing(8)
+    .into();
+
+    let voice_card = setting_card(
+        column![
+            setting_name("Voice disguise", fs),
+            Space::new().height(8),
+            voice_pills,
+            Space::new().height(4),
+            text(match settings.voice_disguise {
+                VoiceDisguise::Off => "Original voice is preserved.",
+                VoiceDisguise::Low => "Pitch shift only. Changes perceived gender/age.",
+                VoiceDisguise::Medium => "Pitch + formant shift. Harder to identify.",
+                VoiceDisguise::High => {
+                    "Full voice morph. Unrecognizable even to forensic analysis."
+                }
+            })
+            .size(scaled(14.0, fs))
+            .color(tertiary),
+        ]
+        .spacing(0),
+        surface,
+        border,
+    );
+
+    column![
+        section_label("AUDIO", fs, section),
+        Space::new().height(14),
+        toggle_card,
+        Space::new().height(10),
+        keywords_card,
+        Space::new().height(10),
+        bleep_card,
+        Space::new().height(10),
+        voice_card,
     ]
     .spacing(0)
     .into()

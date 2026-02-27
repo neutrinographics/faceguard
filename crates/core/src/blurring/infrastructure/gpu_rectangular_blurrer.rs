@@ -38,6 +38,7 @@ impl FrameBlurrer for GpuRectangularBlurrer {
         }
 
         let fw = frame.width() as usize;
+        let fh = frame.height() as usize;
         let channels = frame.channels() as usize;
         let data = frame.data_mut();
 
@@ -47,8 +48,8 @@ impl FrameBlurrer for GpuRectangularBlurrer {
         for r in regions {
             let rx = r.x.max(0) as usize;
             let ry = r.y.max(0) as usize;
-            let rw = r.width.max(0) as usize;
-            let rh = r.height.max(0) as usize;
+            let rw = (r.width.max(0) as usize).min(fw.saturating_sub(rx));
+            let rh = (r.height.max(0) as usize).min(fh.saturating_sub(ry));
 
             if rw == 0 || rh == 0 {
                 continue;
@@ -169,5 +170,16 @@ mod tests {
         let blurrer = GpuRectangularBlurrer::new(ctx, 5);
         blurrer.blur(&mut frame, &[region(10, 10, 0, 20)]).unwrap();
         assert_eq!(frame.data(), &original[..]);
+    }
+
+    #[test]
+    fn test_region_extending_beyond_frame_does_not_panic() {
+        let ctx = match try_gpu_context() {
+            Some(c) => c,
+            None => return,
+        };
+        let mut frame = make_frame(50, 50, 128);
+        let blurrer = GpuRectangularBlurrer::new(ctx, 5);
+        blurrer.blur(&mut frame, &[region(40, 40, 30, 30)]).unwrap();
     }
 }

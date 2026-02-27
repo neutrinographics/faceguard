@@ -25,6 +25,7 @@ pub struct FfmpegWriter {
     audio_source_stream_idx: Option<usize>,
     audio_output_stream_idx: Option<usize>,
     audio_source_time_base: Option<ffmpeg_next::Rational>,
+    pub(crate) skip_audio_passthrough: bool,
 }
 
 // Safety: FfmpegWriter is only used from a single thread at a time.
@@ -48,12 +49,17 @@ impl FfmpegWriter {
             audio_source_stream_idx: None,
             audio_output_stream_idx: None,
             audio_source_time_base: None,
+            skip_audio_passthrough: false,
         }
     }
 
     pub fn with_crf(mut self, crf: u32) -> Self {
         self.crf = crf;
         self
+    }
+
+    pub fn set_skip_audio_passthrough(&mut self, skip: bool) {
+        self.skip_audio_passthrough = skip;
     }
 }
 
@@ -83,10 +89,18 @@ impl VideoWriter for FfmpegWriter {
 
         self.video_stream_index = 0;
 
-        let (audio_src, audio_ost, audio_tb) = setup_audio_passthrough(&mut octx, metadata)?;
+        let (audio_src, audio_ost, audio_tb) = if self.skip_audio_passthrough {
+            (None, None, None)
+        } else {
+            setup_audio_passthrough(&mut octx, metadata)?
+        };
         self.audio_source_stream_idx = audio_src;
         self.audio_output_stream_idx = audio_ost;
         self.audio_source_time_base = audio_tb;
+
+        if metadata.rotation != 0 {
+            set_stream_display_matrix(&mut octx, self.video_stream_index, metadata.rotation);
+        }
 
         octx.write_header()?;
 
@@ -316,6 +330,44 @@ fn mux_audio_from_source(
     }
 }
 
+/// Sets a display matrix on an output stream to encode the given rotation angle.
+///
+/// Uses the raw FFmpeg C API (`av_stream_new_side_data`) because the
+/// ffmpeg-next bindings don't expose stream-level side data writes.
+/// The display matrix is a 3×3 transformation stored as 9 × i32 values:
+/// the first 6 in 16.16 fixed-point, the last 3 in 2.30 fixed-point.
+fn set_stream_display_matrix(
+    octx: &mut ffmpeg_next::format::context::Output,
+    stream_index: usize,
+    rotation_degrees: i32,
+) {
+    use ffmpeg_next::sys::{av_stream_new_side_data, AVPacketSideDataType};
+
+    let angle_rad = -(rotation_degrees as f64).to_radians();
+    let cos_val = (angle_rad.cos() * 65536.0).round() as i32;
+    let sin_val = (angle_rad.sin() * 65536.0).round() as i32;
+
+    // Display matrix layout (row-major):
+    //   [cos, sin, 0]
+    //   [-sin, cos, 0]
+    //   [0,    0,   1]  (2.30 fixed point for last row)
+    let matrix: [i32; 9] = [cos_val, sin_val, 0, -sin_val, cos_val, 0, 0, 0, 0x40000000];
+
+    unsafe {
+        let stream_ptr = (*octx.as_mut_ptr()).streams.add(stream_index).read();
+        let data_ptr = av_stream_new_side_data(
+            stream_ptr,
+            AVPacketSideDataType::AV_PKT_DATA_DISPLAYMATRIX,
+            36,
+        );
+        if !data_ptr.is_null() {
+            for (i, &val) in matrix.iter().enumerate() {
+                std::ptr::copy_nonoverlapping(val.to_ne_bytes().as_ptr(), data_ptr.add(i * 4), 4);
+            }
+        }
+    }
+}
+
 /// Converts a [`Frame`] into an ffmpeg RGB24 video frame, respecting stride.
 fn frame_to_rgb_video(
     frame: &Frame,
@@ -356,6 +408,7 @@ mod tests {
             total_frames: 0,
             codec: String::new(),
             source_path: None,
+            rotation: 0,
         }
     }
 
@@ -455,5 +508,13 @@ mod tests {
             (avg - 128.0).abs() < 40.0,
             "Average pixel value {avg} should be close to 128"
         );
+    }
+
+    #[test]
+    fn test_skip_audio_passthrough_setter() {
+        let mut writer = FfmpegWriter::new();
+        assert!(!writer.skip_audio_passthrough);
+        writer.set_skip_audio_passthrough(true);
+        assert!(writer.skip_audio_passthrough);
     }
 }

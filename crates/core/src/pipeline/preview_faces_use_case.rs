@@ -237,6 +237,7 @@ mod tests {
             total_frames: total,
             codec: String::new(),
             source_path: None,
+            rotation: 0,
         }
     }
 

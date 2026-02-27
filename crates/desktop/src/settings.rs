@@ -44,6 +44,55 @@ impl std::fmt::Display for Appearance {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum VoiceDisguise {
+    Off,
+    Low,
+    Medium,
+    High,
+}
+
+impl VoiceDisguise {
+    pub const ALL: &[VoiceDisguise] = &[
+        VoiceDisguise::Off,
+        VoiceDisguise::Low,
+        VoiceDisguise::Medium,
+        VoiceDisguise::High,
+    ];
+}
+
+impl std::fmt::Display for VoiceDisguise {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VoiceDisguise::Off => write!(f, "Off"),
+            VoiceDisguise::Low => write!(f, "Low"),
+            VoiceDisguise::Medium => write!(f, "Medium"),
+            VoiceDisguise::High => write!(f, "High"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BleepSound {
+    Tone,
+    Silence,
+}
+
+impl BleepSound {
+    pub const ALL: &[BleepSound] = &[BleepSound::Tone, BleepSound::Silence];
+}
+
+impl std::fmt::Display for BleepSound {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BleepSound::Tone => write!(f, "Tone"),
+            BleepSound::Silence => write!(f, "Silence"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     pub blur_shape: BlurShape,
@@ -59,10 +108,26 @@ pub struct Settings {
     pub appearance: Appearance,
     pub high_contrast: bool,
     pub font_scale: f32,
+    #[serde(default)]
+    pub audio_processing: bool,
+    #[serde(default)]
+    pub bleep_keywords: String,
+    #[serde(default = "default_bleep_sound")]
+    pub bleep_sound: BleepSound,
+    #[serde(default = "default_voice_disguise")]
+    pub voice_disguise: VoiceDisguise,
 }
 
 fn default_blur_coverage() -> u32 {
     40
+}
+
+fn default_bleep_sound() -> BleepSound {
+    BleepSound::Tone
+}
+
+fn default_voice_disguise() -> VoiceDisguise {
+    VoiceDisguise::Off
 }
 
 fn default_quality() -> u32 {
@@ -90,6 +155,10 @@ impl Default for Settings {
             appearance: Appearance::System,
             high_contrast: false,
             font_scale: 1.0,
+            audio_processing: false,
+            bleep_keywords: String::new(),
+            bleep_sound: default_bleep_sound(),
+            voice_disguise: default_voice_disguise(),
         }
     }
 }

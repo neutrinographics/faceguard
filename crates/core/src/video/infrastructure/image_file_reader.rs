@@ -139,6 +139,7 @@ impl VideoReader for ImageFileReader {
             total_frames: 1,
             codec: String::new(),
             source_path: Some(path.to_path_buf()),
+            rotation: 0,
         };
         self.metadata = Some(metadata.clone());
         Ok(metadata)

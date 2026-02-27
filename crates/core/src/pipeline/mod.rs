@@ -4,3 +4,4 @@ pub mod infrastructure;
 pub mod pipeline_executor;
 pub mod pipeline_logger;
 pub mod preview_faces_use_case;
+pub mod process_audio_use_case;

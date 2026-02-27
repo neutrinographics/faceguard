@@ -54,6 +54,10 @@ pub struct BlurParams {
     pub blur_ids: Option<HashSet<u32>>,
     pub model_cache: Arc<ModelCache>,
     pub gpu_context: Option<Arc<GpuContext>>,
+    pub audio_processing: bool,
+    pub bleep_keywords: String,
+    pub bleep_sound: crate::settings::BleepSound,
+    pub voice_disguise: crate::settings::VoiceDisguise,
 }
 
 pub fn spawn(params: BlurParams) -> (Receiver<WorkerMessage>, Arc<AtomicBool>) {
@@ -90,6 +94,11 @@ fn run_blur(
         blur_image(input, output, detector, blurrer, params)?;
     } else {
         blur_video(input, output, detector, blurrer, params, tx, cancelled)?;
+    }
+
+    // Audio processing (if enabled)
+    if params.audio_processing {
+        run_audio_processing(input, output, params)?;
     }
 
     if cancelled.load(Ordering::Relaxed) {
@@ -198,7 +207,11 @@ fn blur_video(
     let mut reader: Box<dyn VideoReader> = Box::new(FfmpegReader::new());
     let metadata = reader.open(input)?;
     let crf = crate::settings::quality_to_crf(params.quality);
-    let writer: Box<dyn VideoWriter> = Box::new(FfmpegWriter::new().with_crf(crf));
+    let mut ffmpeg_writer = FfmpegWriter::new().with_crf(crf);
+    if params.audio_processing {
+        ffmpeg_writer.set_skip_audio_passthrough(true);
+    }
+    let writer: Box<dyn VideoWriter> = Box::new(ffmpeg_writer);
     let merger = RegionMerger::new();
 
     let _ = tx.send(WorkerMessage::BlurProgress(0, metadata.total_frames));
@@ -224,6 +237,97 @@ fn blur_video(
         Some(cancelled.clone()),
     );
     use_case.execute(&metadata, output)?;
+    Ok(())
+}
+
+fn run_audio_processing(
+    input: &std::path::Path,
+    output: &std::path::Path,
+    params: &BlurParams,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use faceguard_core::audio::domain::audio_transformer::AudioTransformer;
+    use faceguard_core::audio::infrastructure::formant_shift_transformer::FormantShiftTransformer;
+    use faceguard_core::audio::infrastructure::pitch_shift_transformer::PitchShiftTransformer;
+    use faceguard_core::audio::infrastructure::voice_morph_transformer::VoiceMorphTransformer;
+    use faceguard_core::pipeline::process_audio_use_case::ProcessAudioUseCase;
+    use faceguard_core::video::infrastructure::ffmpeg_audio_reader::FfmpegAudioReader;
+    use faceguard_core::video::infrastructure::ffmpeg_audio_writer::FfmpegAudioWriter;
+
+    let reader = Box::new(FfmpegAudioReader);
+    let writer = Box::new(FfmpegAudioWriter);
+
+    // Set up voice transformer based on disguise level
+    let transformer: Option<Box<dyn AudioTransformer>> = match params.voice_disguise {
+        crate::settings::VoiceDisguise::Off => None,
+        crate::settings::VoiceDisguise::Low => Some(Box::new(PitchShiftTransformer::new(
+            faceguard_core::audio::infrastructure::pitch_shift_transformer::DEFAULT_SEMITONES,
+        ))),
+        crate::settings::VoiceDisguise::Medium => Some(Box::new(FormantShiftTransformer::new(
+            faceguard_core::audio::infrastructure::formant_shift_transformer::DEFAULT_FORMANT_SEMITONES,
+            faceguard_core::audio::infrastructure::formant_shift_transformer::DEFAULT_FORMANT_SHIFT_RATIO,
+        ))),
+        crate::settings::VoiceDisguise::High => Some(Box::new(VoiceMorphTransformer::new(
+            faceguard_core::audio::infrastructure::voice_morph_transformer::DEFAULT_MORPH_SEMITONES,
+            faceguard_core::audio::infrastructure::voice_morph_transformer::DEFAULT_MORPH_FORMANT_RATIO,
+            faceguard_core::audio::infrastructure::voice_morph_transformer::DEFAULT_JITTER_AMOUNT,
+        ))),
+    };
+
+    // Parse keywords
+    let keywords: Vec<String> = if params.bleep_keywords.is_empty() {
+        vec![]
+    } else {
+        params
+            .bleep_keywords
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    };
+
+    let recognizer: Option<
+        Box<dyn faceguard_core::audio::domain::speech_recognizer::SpeechRecognizer>,
+    > = if !keywords.is_empty() {
+        use faceguard_core::audio::infrastructure::whisper_recognizer::WhisperRecognizer;
+        match params
+            .model_cache
+            .wait_for_whisper(&|_, _| {}, &AtomicBool::new(false))
+        {
+            Ok(model_path) => match WhisperRecognizer::new(&model_path) {
+                Ok(r) => Some(Box::new(r)),
+                Err(e) => {
+                    log::warn!("Failed to create WhisperRecognizer: {e}");
+                    None
+                }
+            },
+            Err(e) => {
+                log::warn!("Whisper model not available: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let bleep_mode = match params.bleep_sound {
+        crate::settings::BleepSound::Tone => {
+            faceguard_core::audio::domain::word_censor::BleepMode::Tone
+        }
+        crate::settings::BleepSound::Silence => {
+            faceguard_core::audio::domain::word_censor::BleepMode::Silence
+        }
+    };
+
+    let use_case = ProcessAudioUseCase::new(
+        reader,
+        writer,
+        recognizer,
+        transformer,
+        keywords,
+        bleep_mode,
+    );
+    use_case.run(input, output)?;
+
     Ok(())
 }
 
