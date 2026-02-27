@@ -413,7 +413,7 @@ fn audio_section<'a>(
             text(match settings.voice_disguise {
                 VoiceDisguise::Off => "Original voice is preserved.",
                 VoiceDisguise::On => {
-                    "Full voice morph. Unrecognizable even to forensic analysis."
+                    "Alters pitch, formants, and speech patterns. May not withstand forensic analysis."
                 }
             })
             .size(scaled(14.0, fs))
