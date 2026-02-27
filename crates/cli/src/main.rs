@@ -259,10 +259,15 @@ fn run_video_blur(
                 Some(Box::new(PitchShiftTransformer::new(DEFAULT_SEMITONES)))
             }
             "medium" => {
+                use faceguard_core::audio::domain::audio_transformer::ComposedTransformer;
                 use faceguard_core::audio::infrastructure::formant_shift_transformer::*;
-                Some(Box::new(FormantShiftTransformer::new(
-                    DEFAULT_FORMANT_SHIFT_RATIO,
-                )))
+                use faceguard_core::audio::infrastructure::pitch_shift_transformer::{
+                    PitchShiftTransformer, DEFAULT_SEMITONES,
+                };
+                Some(Box::new(ComposedTransformer::new(vec![
+                    Box::new(PitchShiftTransformer::new(DEFAULT_SEMITONES)),
+                    Box::new(FormantShiftTransformer::new(DEFAULT_FORMANT_SHIFT_RATIO)),
+                ])))
             }
             "high" => {
                 use faceguard_core::audio::infrastructure::voice_morph_transformer::*;

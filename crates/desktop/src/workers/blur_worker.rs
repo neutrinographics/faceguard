@@ -262,9 +262,17 @@ fn run_audio_processing(
         crate::settings::VoiceDisguise::Low => Some(Box::new(PitchShiftTransformer::new(
             faceguard_core::audio::infrastructure::pitch_shift_transformer::DEFAULT_SEMITONES,
         ))),
-        crate::settings::VoiceDisguise::Medium => Some(Box::new(FormantShiftTransformer::new(
-            faceguard_core::audio::infrastructure::formant_shift_transformer::DEFAULT_FORMANT_SHIFT_RATIO,
-        ))),
+        crate::settings::VoiceDisguise::Medium => {
+            use faceguard_core::audio::domain::audio_transformer::ComposedTransformer;
+            Some(Box::new(ComposedTransformer::new(vec![
+                Box::new(PitchShiftTransformer::new(
+                    faceguard_core::audio::infrastructure::pitch_shift_transformer::DEFAULT_SEMITONES,
+                )),
+                Box::new(FormantShiftTransformer::new(
+                    faceguard_core::audio::infrastructure::formant_shift_transformer::DEFAULT_FORMANT_SHIFT_RATIO,
+                )),
+            ])))
+        }
         crate::settings::VoiceDisguise::High => Some(Box::new(VoiceMorphTransformer::new(
             faceguard_core::audio::infrastructure::pitch_shift_transformer::DEFAULT_SEMITONES,
             faceguard_core::audio::infrastructure::formant_shift_transformer::DEFAULT_FORMANT_SHIFT_RATIO,
