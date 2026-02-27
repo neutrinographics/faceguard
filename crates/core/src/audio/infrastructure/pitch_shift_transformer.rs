@@ -77,9 +77,9 @@ fn detect_pitch(frame: &[f64], sample_rate: u32) -> PitchFrame {
 
     let mut best_lag = min_lag;
     let mut best_corr = f64::NEG_INFINITY;
-    for lag in min_lag..=max_lag {
-        if corr[lag] > best_corr {
-            best_corr = corr[lag];
+    for (lag, &c) in corr.iter().enumerate().take(max_lag + 1).skip(min_lag) {
+        if c > best_corr {
+            best_corr = c;
             best_lag = lag;
         }
     }
