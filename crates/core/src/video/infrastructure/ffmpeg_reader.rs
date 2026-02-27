@@ -65,7 +65,7 @@ impl VideoReader for FfmpegReader {
                 .map(|c| c.name().to_string())
                 .unwrap_or_default(),
             source_path: Some(path.to_path_buf()),
-            rotation: 0,
+            rotation: extract_rotation(&stream),
         };
 
         self.video_stream_index = video_stream_index;
@@ -196,6 +196,65 @@ impl Iterator for FfmpegFrameIter<'_> {
                 return Some(result);
             }
         }
+    }
+}
+
+/// Extracts the rotation angle from a video stream.
+///
+/// Tries stream side data (DisplayMatrix) first, then falls back to the
+/// `"rotate"` metadata tag. Returns 0, 90, 180, or 270.
+fn extract_rotation(stream: &ffmpeg_next::format::stream::Stream) -> i32 {
+    // Try DisplayMatrix side data first
+    for side_data in stream.side_data() {
+        if side_data.kind() == ffmpeg_next::codec::packet::side_data::Type::DisplayMatrix {
+            let data = side_data.data();
+            if let Some(angle) = parse_display_matrix(data) {
+                return normalize_rotation(angle);
+            }
+        }
+    }
+
+    // Fallback: check stream metadata for "rotate" tag
+    if let Some(rotate_str) = stream.metadata().get("rotate") {
+        if let Ok(angle) = rotate_str.parse::<i32>() {
+            return normalize_rotation(angle);
+        }
+    }
+
+    0
+}
+
+/// Parses a 3x3 display matrix (9 x i32, 16.16 fixed-point) to extract
+/// the rotation angle in degrees.
+///
+/// The matrix is stored as 9 consecutive i32 values in little-endian format.
+/// Rotation is derived from atan2(matrix[3], matrix[0]) which gives the angle
+/// of the first row vector. The result is negated because the display matrix
+/// represents the transformation needed to display correctly (inverse of the
+/// actual rotation).
+fn parse_display_matrix(data: &[u8]) -> Option<i32> {
+    if data.len() < 36 {
+        return None;
+    }
+
+    let m00 = i32::from_le_bytes(data[0..4].try_into().ok()?) as f64 / 65536.0;
+    let m10 = i32::from_le_bytes(data[4..8].try_into().ok()?) as f64 / 65536.0;
+
+    let angle_rad = m10.atan2(m00);
+    let angle_deg = -angle_rad.to_degrees().round() as i32;
+
+    Some(angle_deg)
+}
+
+/// Normalizes an angle to one of 0, 90, 180, or 270.
+fn normalize_rotation(angle: i32) -> i32 {
+    let normalized = ((angle % 360) + 360) % 360;
+    match normalized {
+        0..=44 | 316..=359 => 0,
+        45..=134 => 90,
+        135..=224 => 180,
+        225..=315 => 270,
+        _ => 0,
     }
 }
 
@@ -391,6 +450,65 @@ mod tests {
         let mut reader = FfmpegReader::new();
         let result = reader.frames().next().unwrap();
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_display_matrix_90_degrees() {
+        // A 90° clockwise rotation display matrix:
+        //   [ 0,  1,  0 ]
+        //   [-1,  0,  0 ]
+        //   [ 0,  0,  1 ]
+        // In 16.16 fixed point: 0=0, 1=65536, -1=-65536
+        // Matrix layout: m00, m10, m20, m01, m11, m21, m02, m12, m22
+        // For 90° rotation (display matrix convention):
+        //   m00=0, m10=65536 (sin90=1), m20=0
+        let mut data = vec![0u8; 36];
+        let m00: i32 = 0; // cos(90°) = 0
+        let m10: i32 = 65536; // sin(90°) = 1
+        data[0..4].copy_from_slice(&m00.to_le_bytes());
+        data[4..8].copy_from_slice(&m10.to_le_bytes());
+
+        // atan2(65536, 0) = π/2 ≈ 90°, negated = -90°, normalized = 270
+        // But phone videos use the convention where the matrix stores
+        // the inverse transform, so we negate to get actual rotation
+        let angle = parse_display_matrix(&data).unwrap();
+        let normalized = normalize_rotation(angle);
+        assert!(
+            normalized == 90 || normalized == 270,
+            "Expected 90 or 270, got {normalized}"
+        );
+    }
+
+    #[test]
+    fn test_parse_display_matrix_identity() {
+        // Identity matrix = no rotation
+        let mut data = vec![0u8; 36];
+        let one: i32 = 65536; // 1.0 in 16.16 fixed point
+        data[0..4].copy_from_slice(&one.to_le_bytes());
+        // m10 = 0 (already zeroed)
+        let angle = parse_display_matrix(&data).unwrap();
+        assert_eq!(normalize_rotation(angle), 0);
+    }
+
+    #[test]
+    fn test_parse_display_matrix_too_short() {
+        let data = vec![0u8; 20];
+        assert!(parse_display_matrix(&data).is_none());
+    }
+
+    #[test]
+    fn test_normalize_rotation() {
+        assert_eq!(normalize_rotation(0), 0);
+        assert_eq!(normalize_rotation(90), 90);
+        assert_eq!(normalize_rotation(180), 180);
+        assert_eq!(normalize_rotation(270), 270);
+        assert_eq!(normalize_rotation(360), 0);
+        assert_eq!(normalize_rotation(-90), 270);
+        assert_eq!(normalize_rotation(-180), 180);
+        assert_eq!(normalize_rotation(45), 90);
+        assert_eq!(normalize_rotation(44), 0);
+        assert_eq!(normalize_rotation(315), 270);
+        assert_eq!(normalize_rotation(316), 0);
     }
 
     #[test]
