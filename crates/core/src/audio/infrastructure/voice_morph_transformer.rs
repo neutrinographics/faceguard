@@ -90,8 +90,7 @@ impl AudioTransformer for VoiceMorphTransformer {
             let local_ratio = 2.0_f64.powf(local_semitones / 12.0);
 
             // Use grain from the same time position (time-preserving pitch shift)
-            let nearest_idx =
-                find_nearest_mark(&analysis_marks, synth_pos);
+            let nearest_idx = find_nearest_mark(&analysis_marks, synth_pos);
             grain_sources.push((synth_pos, nearest_idx));
 
             // Advance by local period at output pitch
@@ -101,8 +100,7 @@ impl AudioTransformer for VoiceMorphTransformer {
         }
 
         // Step 3: PSOLA overlap-add using shared core
-        let output =
-            psola_overlap_add(&samples, &analysis_marks, &pitch_frames, &grain_sources);
+        let output = psola_overlap_add(&samples, &analysis_marks, &pitch_frames, &grain_sources);
 
         // Peak-normalize
         let input_peak = samples.iter().map(|s| s.abs()).fold(0.0f64, f64::max);

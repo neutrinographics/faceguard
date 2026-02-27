@@ -104,7 +104,10 @@ pub(crate) fn analyze_pitch(samples: &[f64], sample_rate: u32) -> Vec<PitchFrame
     let mut frames = Vec::new();
     let mut pos = 0;
     while pos + ANALYSIS_FRAME_SIZE <= n {
-        frames.push(detect_pitch(&samples[pos..pos + ANALYSIS_FRAME_SIZE], sample_rate));
+        frames.push(detect_pitch(
+            &samples[pos..pos + ANALYSIS_FRAME_SIZE],
+            sample_rate,
+        ));
         pos += ANALYSIS_HOP;
     }
     frames
@@ -356,7 +359,9 @@ mod tests {
         let mut rng_state: u64 = 12345;
         let noise: Vec<f64> = (0..ANALYSIS_FRAME_SIZE)
             .map(|_| {
-                rng_state = rng_state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+                rng_state = rng_state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1);
                 let bits = (rng_state >> 33) as f64;
                 let max = (1u64 << 31) as f64;
                 (bits / max) * 2.0 - 1.0

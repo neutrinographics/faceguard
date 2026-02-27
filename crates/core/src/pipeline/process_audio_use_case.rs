@@ -51,11 +51,7 @@ impl ProcessAudioUseCase {
         let censor_regions = if !self.keywords.is_empty() {
             if let Some(ref recognizer) = self.recognizer {
                 let transcript = recognizer.transcribe(&audio)?;
-                WordCensor::find_censor_regions(
-                    &transcript,
-                    &self.keywords,
-                    DEFAULT_BLEEP_PADDING,
-                )
+                WordCensor::find_censor_regions(&transcript, &self.keywords, DEFAULT_BLEEP_PADDING)
             } else {
                 Vec::new()
             }
