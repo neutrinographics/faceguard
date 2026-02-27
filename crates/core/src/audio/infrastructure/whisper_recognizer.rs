@@ -17,11 +17,7 @@ pub struct WhisperRecognizer {
 impl WhisperRecognizer {
     pub fn new(model_path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
         if !model_path.exists() {
-            return Err(format!(
-                "Whisper model not found at: {}",
-                model_path.display()
-            )
-            .into());
+            return Err(format!("Whisper model not found at: {}", model_path.display()).into());
         }
         Ok(Self {
             model_path: model_path.to_path_buf(),
@@ -86,10 +82,7 @@ impl SpeechRecognizer for WhisperRecognizer {
 
                 // Skip special tokens (start with [, like [_BEG_], [_SOT_], etc.)
                 let trimmed = text.trim();
-                if trimmed.is_empty()
-                    || trimmed.starts_with('[')
-                    || trimmed.starts_with('<')
-                {
+                if trimmed.is_empty() || trimmed.starts_with('[') || trimmed.starts_with('<') {
                     continue;
                 }
 
