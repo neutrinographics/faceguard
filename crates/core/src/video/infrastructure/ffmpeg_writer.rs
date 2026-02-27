@@ -98,6 +98,14 @@ impl VideoWriter for FfmpegWriter {
         self.audio_output_stream_idx = audio_ost;
         self.audio_source_time_base = audio_tb;
 
+        if metadata.rotation != 0 {
+            if let Some(mut video_stream) = octx.stream_mut(self.video_stream_index) {
+                let mut dict = ffmpeg_next::Dictionary::new();
+                dict.set("rotate", &metadata.rotation.to_string());
+                video_stream.set_metadata(dict);
+            }
+        }
+
         octx.write_header()?;
 
         let scaler = ffmpeg_next::software::scaling::Context::get(
